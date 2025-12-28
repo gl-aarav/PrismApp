@@ -1,0 +1,22 @@
+# Build Artifacts
+.build/
+Prism.app/
+Prism_Installer.dmg
+dmg_source/
+
+# System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# User Settings
+.vscode/
+*.xcworkspace
+xcuserdata/
+
+# Temporary Files
+tmp/
+*.tmp
+*.bak
+*.swp

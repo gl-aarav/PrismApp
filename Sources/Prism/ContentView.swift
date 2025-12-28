@@ -1,0 +1,2491 @@
+import SwiftUI
+import AppKit
+import WebKit
+import SwiftMath
+import Foundation
+
+// MARK: - Models
+
+struct MarkdownBlock: Identifiable, Equatable {
+    let id = UUID()
+    let type: MarkdownBlockType
+    
+    static func == (lhs: MarkdownBlock, rhs: MarkdownBlock) -> Bool {
+        return lhs.type == rhs.type
+    }
+}
+
+enum MarkdownBlockType: Equatable {
+    case text(String)
+    case code(String, String)
+    case heading(String, Int)
+    case divider
+    case bullet(String)
+    case numbered(String, Int)
+    case blockquote(String)
+    case table(headers: [String], rows: [[String]])
+    case math(String)
+}
+
+struct ChatSession: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var title: String
+    var date = Date()
+    var messages: [Message]
+}
+
+struct Message: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var content: String {
+        didSet {
+            _cachedBlocks = nil
+        }
+    }
+    var thinkingContent: String?
+    var thinkingDuration: TimeInterval?
+    var imageData: Data?
+    var isUser: Bool
+    var timestamp = Date()
+    
+    // Cache the decoded image to avoid expensive decoding on main thread
+    private var _cachedImage: NSImage?
+    
+    // Cache parsed markdown blocks
+    private var _cachedBlocks: [MarkdownBlock]?
+    
+    var image: NSImage? {
+        if let cached = _cachedImage { return cached }
+        if let data = imageData {
+            return NSImage(data: data)
+        }
+        return nil
+    }
+    
+    var blocks: [MarkdownBlock] {
+        if let cached = _cachedBlocks { return cached }
+        return Message.parseMarkdown(content)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case id, content, thinkingContent, thinkingDuration, imageData, isUser, timestamp
+    }
+    
+    init(content: String, thinkingContent: String? = nil, thinkingDuration: TimeInterval? = nil, image: NSImage? = nil, isUser: Bool) {
+        self.content = content
+        self.thinkingContent = thinkingContent
+        self.thinkingDuration = thinkingDuration
+        self.imageData = image?.tiffRepresentation
+        self.isUser = isUser
+        self._cachedImage = image
+        self._cachedBlocks = Message.parseMarkdown(content)
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        content = try container.decode(String.self, forKey: .content)
+        thinkingContent = try container.decodeIfPresent(String.self, forKey: .thinkingContent)
+        thinkingDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .thinkingDuration)
+        imageData = try container.decodeIfPresent(Data.self, forKey: .imageData)
+        isUser = try container.decode(Bool.self, forKey: .isUser)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        
+        if let data = imageData {
+            _cachedImage = NSImage(data: data)
+        }
+        _cachedBlocks = Message.parseMarkdown(content)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(content, forKey: .content)
+        try container.encode(thinkingContent, forKey: .thinkingContent)
+        try container.encode(thinkingDuration, forKey: .thinkingDuration)
+        try container.encode(imageData, forKey: .imageData)
+        try container.encode(isUser, forKey: .isUser)
+        try container.encode(timestamp, forKey: .timestamp)
+    }
+    
+    static func parseMarkdown(_ text: String) -> [MarkdownBlock] {
+        var blocks: [MarkdownBlock] = []
+        let lines = text.components(separatedBy: .newlines)
+        var currentText = ""
+        var inCodeBlock = false
+        var codeBlockContent = ""
+        var codeLanguage = ""
+        var inMathBlock = false
+        var mathBlockContent = ""
+        var mathDelimiter = ""
+        
+        var i = 0
+        while i < lines.count {
+            let line = lines[i]
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            
+            if trimmedLine.hasPrefix("```") {
+                if inCodeBlock {
+                    blocks.append(MarkdownBlock(type: .code(codeBlockContent.trimmingCharacters(in: .newlines), codeLanguage)))
+                    codeBlockContent = ""
+                    codeLanguage = ""
+                    inCodeBlock = false
+                } else {
+                    if !currentText.isEmpty {
+                        blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                        currentText = ""
+                    }
+                    codeLanguage = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                    inCodeBlock = true
+                }
+            } else if inCodeBlock {
+                codeBlockContent += line + "\n"
+            } else if trimmedLine.hasPrefix("$$") || trimmedLine.hasPrefix("\\[") {
+                let isBracket = trimmedLine.hasPrefix("\\[")
+                let startDelim = isBracket ? "\\[" : "$$"
+                let endDelim = isBracket ? "\\]" : "$$"
+                
+                if inMathBlock {
+                    // Check if this line closes the current block
+                    if trimmedLine.hasSuffix(mathDelimiter) {
+                        mathBlockContent += String(trimmedLine.dropLast(mathDelimiter.count))
+                        blocks.append(MarkdownBlock(type: .math(mathBlockContent.trimmingCharacters(in: .newlines))))
+                        mathBlockContent = ""
+                        inMathBlock = false
+                    } else {
+                        mathBlockContent += line + "\n"
+                    }
+                } else {
+                    if !currentText.isEmpty {
+                        blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                        currentText = ""
+                    }
+                    
+                    if trimmedLine.count > startDelim.count && trimmedLine.hasSuffix(endDelim) {
+                        // Single line block: $$ x^2 $$ or \[ x^2 \]
+                        let content = String(trimmedLine.dropFirst(startDelim.count).dropLast(endDelim.count))
+                        blocks.append(MarkdownBlock(type: .math(content.trimmingCharacters(in: .whitespaces))))
+                    } else {
+                        inMathBlock = true
+                        mathDelimiter = endDelim
+                        let content = String(trimmedLine.dropFirst(startDelim.count))
+                        if !content.isEmpty {
+                            mathBlockContent += content + "\n"
+                        }
+                    }
+                }
+            } else if inMathBlock {
+                if trimmedLine.hasSuffix(mathDelimiter) {
+                    mathBlockContent += String(trimmedLine.dropLast(mathDelimiter.count))
+                    blocks.append(MarkdownBlock(type: .math(mathBlockContent.trimmingCharacters(in: .newlines))))
+                    mathBlockContent = ""
+                    inMathBlock = false
+                } else {
+                    mathBlockContent += line + "\n"
+                }
+            } else if trimmedLine.contains("$$") && !inCodeBlock {
+                // Handle inline display math that should be a block
+                let parts = line.components(separatedBy: "$$")
+                if parts.count >= 3 {
+                    currentText += line + "\n"
+                } else {
+                    currentText += line + "\n"
+                }
+            } else if trimmedLine == "---" {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                blocks.append(MarkdownBlock(type: .divider))
+            } else if line.hasPrefix("# ") {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                blocks.append(MarkdownBlock(type: .heading(String(line.dropFirst(2)), 1)))
+            } else if line.hasPrefix("## ") {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                blocks.append(MarkdownBlock(type: .heading(String(line.dropFirst(3)), 2)))
+            } else if line.hasPrefix("### ") {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                blocks.append(MarkdownBlock(type: .heading(String(line.dropFirst(4)), 3)))
+            } else if line.hasPrefix("#### ") {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                blocks.append(MarkdownBlock(type: .heading(String(line.dropFirst(5)), 4)))
+            } else if line.hasPrefix("\\section{") && line.hasSuffix("}") {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                let title = String(line.dropFirst(9).dropLast(1))
+                blocks.append(MarkdownBlock(type: .heading(title, 1)))
+            } else if line.hasPrefix("\\subsection{") && line.hasSuffix("}") {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                let title = String(line.dropFirst(12).dropLast(1))
+                blocks.append(MarkdownBlock(type: .heading(title, 2)))
+            } else if trimmedLine.hasPrefix("\\item ") {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                let content = String(trimmedLine.dropFirst(6))
+                blocks.append(MarkdownBlock(type: .bullet(content)))
+            } else if trimmedLine.hasPrefix("\\begin{itemize}") || trimmedLine.hasPrefix("\\end{itemize}") || trimmedLine.hasPrefix("\\begin{enumerate}") || trimmedLine.hasPrefix("\\end{enumerate}") {
+                 // Ignore these lines as they are just structure markers
+                 if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+            } else if trimmedLine.hasPrefix("* ") || trimmedLine.hasPrefix("- ") {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                let content = String(trimmedLine.dropFirst(2))
+                blocks.append(MarkdownBlock(type: .bullet(content)))
+            } else if let match = trimmedLine.range(of: "^\\d+\\. ", options: .regularExpression) {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                let numberStr = String(trimmedLine[..<match.upperBound].dropLast(2))
+                let number = Int(numberStr) ?? 1
+                let content = String(trimmedLine[match.upperBound...])
+                blocks.append(MarkdownBlock(type: .numbered(content, number)))
+            } else if trimmedLine.hasPrefix("> ") {
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                blocks.append(MarkdownBlock(type: .blockquote(String(trimmedLine.dropFirst(2)))))
+            } else if trimmedLine.hasPrefix("|") {
+                // Potential table start
+                if !currentText.isEmpty {
+                    blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+                    currentText = ""
+                }
+                
+                // Check if next line is separator
+                if i + 1 < lines.count {
+                    let nextLine = lines[i+1].trimmingCharacters(in: .whitespaces)
+                    if nextLine.hasPrefix("|") && nextLine.contains("---") {
+                        // It is a table
+                        let headers = trimmedLine.split(separator: "|").map { String($0).trimmingCharacters(in: .whitespaces) }
+                        var rows: [[String]] = []
+                        
+                        // Skip header and separator
+                        i += 2
+                        
+                        while i < lines.count {
+                            let rowLine = lines[i].trimmingCharacters(in: .whitespaces)
+                            if !rowLine.hasPrefix("|") {
+                                i -= 1 // Backtrack so main loop processes this line
+                                break
+                            }
+                            let cells = rowLine.split(separator: "|").map { String($0).trimmingCharacters(in: .whitespaces) }
+                            if !cells.isEmpty {
+                                rows.append(cells)
+                            }
+                            i += 1
+                        }
+                        blocks.append(MarkdownBlock(type: .table(headers: headers, rows: rows)))
+                    } else {
+                        currentText += line + "\n"
+                    }
+                } else {
+                    currentText += line + "\n"
+                }
+            } else {
+                currentText += line + "\n"
+            }
+            i += 1
+        }
+        
+        if !currentText.isEmpty {
+            blocks.append(MarkdownBlock(type: .text(currentText.trimmingCharacters(in: .newlines))))
+        }
+        
+        return blocks
+    }
+    
+    static func == (lhs: Message, rhs: Message) -> Bool {
+        // Optimization: Check ID and metadata first
+        if lhs.id != rhs.id { return false }
+        if lhs.isUser != rhs.isUser { return false }
+        if lhs.timestamp != rhs.timestamp { return false }
+        if lhs.content != rhs.content { return false }
+        
+        // Optimization: Avoid deep data comparison for images if possible
+        // If both have no image, equal.
+        if lhs.imageData == nil && rhs.imageData == nil { return true }
+        // If one has image and other doesn't, not equal.
+        if (lhs.imageData == nil) != (rhs.imageData == nil) { return false }
+        // If both have image, check size first
+        if let lData = lhs.imageData, let rData = rhs.imageData {
+            if lData.count != rData.count { return false }
+            // If sizes match, we assume they are the same for performance in this context.
+            // A true deep compare would be lData == rData, but that causes scroll hitching.
+            return true 
+        }
+        return true
+    }
+}
+
+// MARK: - Services
+
+class ChatManager: ObservableObject {
+    @Published var sessions: [ChatSession] = []
+    @Published var currentSessionId: UUID?
+    
+    private let savePath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("chat_history.json")
+    
+    init() {
+        loadSessions()
+        if sessions.isEmpty {
+            createNewSession()
+        }
+    }
+    
+    func createNewSession() {
+        // Check if the current session is already a "New Chat" (empty or default title with no messages)
+        if let currentId = currentSessionId,
+           let currentSession = sessions.first(where: { $0.id == currentId }),
+           currentSession.messages.isEmpty {
+            return
+        }
+        
+        let newSession = ChatSession(title: "New Chat", messages: [])
+        sessions.insert(newSession, at: 0)
+        currentSessionId = newSession.id
+        saveSessions()
+    }
+    
+    func deleteSession(id: UUID) {
+        sessions.removeAll { $0.id == id }
+        if sessions.isEmpty {
+            createNewSession()
+        } else if currentSessionId == id {
+            currentSessionId = sessions.first?.id
+        }
+        saveSessions()
+    }
+    
+    func deleteAllSessions() {
+        sessions.removeAll()
+        createNewSession()
+    }
+    
+    func addMessage(_ message: Message) {
+        if sessions.isEmpty {
+            createNewSession()
+        }
+        guard let index = sessions.firstIndex(where: { $0.id == currentSessionId }) else { return }
+        sessions[index].messages.append(message)
+        
+        // Update title if it's the first user message
+        if sessions[index].messages.filter({ $0.isUser }).count == 1 && message.isUser {
+            sessions[index].title = String(message.content.prefix(30))
+        }
+        
+        saveSessions()
+    }
+    
+    func updateMessage(id: UUID, content: String, thinkingContent: String? = nil) {
+        guard let index = sessions.firstIndex(where: { $0.id == currentSessionId }),
+              let msgIndex = sessions[index].messages.firstIndex(where: { $0.id == id }) else { return }
+        
+        var msg = sessions[index].messages[msgIndex]
+        msg.content = content
+        if let thinking = thinkingContent {
+            msg.thinkingContent = thinking
+        }
+        sessions[index].messages[msgIndex] = msg
+        // We don't save on every chunk to avoid disk thrashing, but we should save at the end
+    }
+    
+    func finalizeMessageUpdate() {
+        saveSessions()
+    }
+    
+    func getCurrentMessages() -> [Message] {
+        guard let index = sessions.firstIndex(where: { $0.id == currentSessionId }) else { return [] }
+        return sessions[index].messages
+    }
+    
+    func removeLastMessage() {
+        guard let index = sessions.firstIndex(where: { $0.id == currentSessionId }) else { return }
+        if !sessions[index].messages.isEmpty {
+            sessions[index].messages.removeLast()
+            saveSessions()
+        }
+    }
+    
+    func truncateHistory(from messageId: UUID) {
+        guard let index = sessions.firstIndex(where: { $0.id == currentSessionId }) else { return }
+        if let msgIndex = sessions[index].messages.firstIndex(where: { $0.id == messageId }) {
+            sessions[index].messages.removeSubrange(msgIndex...)
+            saveSessions()
+        }
+    }
+    
+    private func saveSessions() {
+        if let data = try? JSONEncoder().encode(sessions) {
+            try? data.write(to: savePath)
+        }
+    }
+    
+    private func loadSessions() {
+        if let data = try? Data(contentsOf: savePath),
+           let loaded = try? JSONDecoder().decode([ChatSession].self, from: data) {
+            sessions = loaded
+            currentSessionId = sessions.first?.id
+        }
+    }
+}
+
+class OllamaService {
+    func sendMessageStream(history: [Message], endpoint: String, model: String) -> AsyncThrowingStream<(String, String?), Error> {
+        return AsyncThrowingStream { continuation in
+            Task {
+                let baseURL = endpoint.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                guard let url = URL(string: "\(baseURL)/api/chat") else {
+                    continuation.finish(throwing: URLError(.badURL))
+                    return
+                }
+                
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+                
+                let messages: [[String: Any]] = history.map { msg in
+                    var message: [String: Any] = [
+                        "role": msg.isUser ? "user" : "assistant",
+                        "content": msg.content
+                    ]
+                    
+                    if let data = msg.imageData {
+                        message["images"] = [data.base64EncodedString()]
+                    }
+                    
+                    return message
+                }
+                
+                let body: [String: Any] = [
+                    "model": model.isEmpty ? "llama3" : model,
+                    "messages": messages,
+                    "stream": true
+                ]
+                
+                do {
+                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    let (result, response) = try await URLSession.shared.bytes(for: request)
+                    
+                    guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                        continuation.finish(throwing: URLError(.badServerResponse))
+                        return
+                    }
+                    
+                    var isThinking = false
+                    
+                    for try await line in result.lines {
+                        guard let data = line.data(using: .utf8),
+                              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              let message = json["message"] as? [String: Any],
+                              let content = message["content"] as? String else { continue }
+                        
+                        // Simple state machine for <think> tags
+                        // Note: This is a basic implementation. It assumes tags don't get split across chunks too awkwardly,
+                        // but for a robust solution we might need a buffer. For now, we'll handle the common case.
+                        
+                        var processedContent = content
+                        var thinkingPart: String? = nil
+                        var contentPart: String = ""
+                        
+                        if content.contains("<think>") {
+                            isThinking = true
+                            processedContent = processedContent.replacingOccurrences(of: "<think>", with: "")
+                        }
+                        
+                        if content.contains("</think>") {
+                            isThinking = false
+                            let parts = processedContent.components(separatedBy: "</think>")
+                            if parts.count > 0 {
+                                thinkingPart = parts[0]
+                            }
+                            if parts.count > 1 {
+                                contentPart = parts[1]
+                            }
+                        } else {
+                            if isThinking {
+                                thinkingPart = processedContent
+                            } else {
+                                contentPart = processedContent
+                            }
+                        }
+                        
+                        continuation.yield((contentPart, thinkingPart))
+                        
+                        if let done = json["done"] as? Bool, done {
+                            break
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+}
+
+class GeminiService {
+    func sendMessageStream(history: [Message], apiKey: String, model: String) -> AsyncThrowingStream<String, Error> {
+        return AsyncThrowingStream { continuation in
+            Task {
+                let modelName = model.isEmpty ? "gemini-1.5-flash" : model
+                guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(modelName):streamGenerateContent?key=\(apiKey)&alt=sse") else {
+                    continuation.finish(throwing: URLError(.badURL))
+                    return
+                }
+                
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+                
+                // Convert history to Gemini format
+                let contents: [[String: Any]] = history.map { msg in
+                    var parts: [[String: Any]] = []
+                    
+                    if !msg.content.isEmpty {
+                        parts.append(["text": msg.content])
+                    }
+                    
+                    if let data = msg.imageData, let _ = NSImage(data: data) {
+                        // Convert to base64
+                        let base64 = data.base64EncodedString()
+                        parts.append([
+                            "inline_data": [
+                                "mime_type": "image/jpeg", // Assuming JPEG/PNG compatible data
+                                "data": base64
+                            ]
+                        ])
+                    }
+                    
+                    // Ensure at least one part exists (Gemini requires non-empty parts)
+                    if parts.isEmpty {
+                        parts.append(["text": " "])
+                    }
+                    
+                    return [
+                        "role": msg.isUser ? "user" : "model",
+                        "parts": parts
+                    ]
+                }
+                
+                let body: [String: Any] = ["contents": contents]
+                
+                do {
+                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    let (result, response) = try await URLSession.shared.bytes(for: request)
+                    
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        continuation.finish(throwing: URLError(.badServerResponse))
+                        return
+                    }
+                    
+                    if httpResponse.statusCode != 200 {
+                        // Try to read error
+                        var errorText = ""
+                        for try await line in result.lines {
+                            errorText += line
+                        }
+                        continuation.finish(throwing: NSError(domain: "GeminiError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorText]))
+                        return
+                    }
+                    
+                    for try await line in result.lines {
+                        if line.hasPrefix("data: ") {
+                            let jsonStr = String(line.dropFirst(6))
+                            if jsonStr == "[DONE]" { break }
+                            
+                            guard let data = jsonStr.data(using: .utf8),
+                                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                                  let candidates = json["candidates"] as? [[String: Any]],
+                                  let content = candidates.first?["content"] as? [String: Any],
+                                  let parts = content["parts"] as? [[String: Any]],
+                                  let text = parts.first?["text"] as? String else { continue }
+                            
+                            continuation.yield(text)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+}
+
+class ShortcutService {
+    func runShortcut(name: String, input: String, image: NSImage?) async throws -> (String, NSImage?) {
+        let task = Process()
+        let pipe = Pipe()
+        let inputPipe = Pipe()
+        
+        task.standardOutput = pipe
+        task.standardError = pipe
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+        
+        // If there is an image, copy it to clipboard so the shortcut can access it if needed.
+        // We prioritize sending text as the input to the shortcut to ensure the prompt is received.
+        if let image = image {
+            DispatchQueue.main.async {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.writeObjects([image])
+            }
+        }
+        
+        task.standardInput = inputPipe
+        task.arguments = ["run", name]
+        
+        do {
+            try task.run()
+            
+            if let data = input.data(using: .utf8) {
+                try inputPipe.fileHandleForWriting.write(contentsOf: data)
+                try inputPipe.fileHandleForWriting.close()
+            }
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            
+            // Check if output is an image
+            if let image = NSImage(data: data) {
+                return ("", image)
+            }
+            
+            // RTF Cleanup
+            if let attributedString = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
+                let plainText = attributedString.string.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !plainText.isEmpty { return (plainText, nil) }
+            }
+            
+            let output = String(data: data, encoding: .utf8) ?? ""
+            return (output.trimmingCharacters(in: .whitespacesAndNewlines), nil)
+        } catch {
+            return ("System Error: \(error.localizedDescription)", nil)
+        }
+    }
+}
+
+// MARK: - Views
+
+struct WebView: NSViewRepresentable {
+    let url: URL
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        let pagePrefs = WKWebpagePreferences()
+        pagePrefs.allowsContentJavaScript = true
+        config.defaultWebpagePreferences = pagePrefs
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        
+        let webView = WKWebView(frame: .zero, configuration: config)
+        // Use standard Mac Safari User Agent to ensure compatibility with Google Sign-In and WebAuthn
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        return webView
+    }
+    
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        if context.coordinator.lastLoadedURL != url {
+            context.coordinator.lastLoadedURL = url
+            let request = URLRequest(url: url)
+            nsView.load(request)
+        }
+    }
+    
+    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        var parent: WebView
+        var lastLoadedURL: URL?
+        
+        init(_ parent: WebView) {
+            self.parent = parent
+        }
+        
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            // Create a new window for popups (essential for Google Sign-In)
+            let popupWebView = WKWebView(frame: .zero, configuration: configuration)
+            popupWebView.navigationDelegate = self
+            popupWebView.uiDelegate = self
+            popupWebView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
+            
+            let popupWindow = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            popupWindow.center()
+            popupWindow.title = "Sign In"
+            popupWindow.contentView = popupWebView
+            popupWindow.makeKeyAndOrderFront(nil)
+            
+            return popupWebView
+        }
+        
+        func webViewDidClose(_ webView: WKWebView) {
+            webView.window?.close()
+        }
+    }
+}
+
+struct ContentView: View {
+    @StateObject private var chatManager = ChatManager()
+    @State private var inputText: String = ""
+    @State private var selectedImage: NSImage? = nil
+    @State private var isLoading: Bool = false
+    @State private var showSettings: Bool = false
+    @State private var showSidebar: Bool = false
+    @State private var lastMessageCount: Int = 0
+    @State private var lastSessionId: UUID?
+    
+    // Settings
+    @AppStorage("GeminiKey") private var geminiKey: String = ""
+    @AppStorage("GeminiModel") private var geminiModel: String = "gemini-1.5-flash"
+    @AppStorage("OllamaURL") private var ollamaURL: String = "http://localhost:11434"
+    @AppStorage("OllamaModel") private var ollamaModel: String = "gpt-oss:120b-cloud"
+    @AppStorage("SelectedProvider") private var selectedProvider: String = "Gemini API"
+    
+    @AppStorage("ShortcutPrivateCloud") private var shortcutPrivateCloud: String = "Ask AI Private"
+    @AppStorage("ShortcutOnDevice") private var shortcutOnDevice: String = "Ask AI Device"
+    @AppStorage("ShortcutChatGPT") private var shortcutChatGPT: String = "Ask ChatGPT"
+    @AppStorage("ShortcutImageGen") private var shortcutImageGen: String = "Generate Image"
+    
+    @AppStorage("BackgroundImagePath") private var backgroundImagePath: String = ""
+    @AppStorage("hasSeenWelcome") private var hasSeenWelcome: Bool = false
+    @State private var showSplash: Bool = true
+    
+    private let geminiService = GeminiService()
+    private let ollamaService = OllamaService()
+    private let shortcutService = ShortcutService()
+    
+    var body: some View {
+        ZStack {
+            NavigationSplitView {
+                SidebarView(chatManager: chatManager)
+        } detail: {
+            ZStack {
+                // Background Layer
+                GeometryReader { geometry in
+                    if !backgroundImagePath.isEmpty, let image = NSImage(contentsOfFile: backgroundImagePath) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .clipped()
+                            .opacity(0.3)
+                    } else {
+                        LinearGradient(gradient: Gradient(colors: [Color(nsColor: .windowBackgroundColor), Color.blue.opacity(0.05)]), startPoint: .top, endPoint: .bottom)
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                    }
+                }
+                .ignoresSafeArea()
+                
+                // Content Layer
+                if isWebViewProvider(selectedProvider) {
+                    VStack(spacing: 0) {
+                        HeaderView(
+                            selectedProvider: $selectedProvider,
+                            showSettings: $showSettings,
+                            onNewChat: chatManager.createNewSession
+                        )
+                        
+                        if let url = getWebURL(for: selectedProvider) {
+                            WebView(url: url)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        HeaderView(
+                            selectedProvider: $selectedProvider,
+                            showSettings: $showSettings,
+                            onNewChat: chatManager.createNewSession
+                        )
+                        
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVStack(spacing: 24) {
+                                    let messages = chatManager.getCurrentMessages()
+                                    if messages.isEmpty {
+                                        EmptyStateView()
+                                    } else {
+                                        ForEach(messages) { message in
+                                            MessageView(
+                                                message: message,
+                                                onRegenerate: (!message.isUser && !isLoading) ? { regenerateResponse(for: message.id) } : nil
+                                            )
+                                            .equatable()
+                                        }
+                                    }
+                                    if isLoading {
+                                        HStack {
+                                            TypingIndicator()
+                                            Spacer()
+                                        }
+                                        .padding(.horizontal)
+                                        .id("typingIndicator")
+                                    }
+                                }
+                                .padding()
+                            }
+                            .safeAreaInset(edge: .bottom) {
+                                InputView(
+                                    inputText: $inputText,
+                                    selectedImage: $selectedImage,
+                                    isLoading: isLoading,
+                                    onSend: sendMessage,
+                                    onSelectImage: selectImage,
+                                    isImageGen: selectedProvider == "Image Creation"
+                                )
+                            }
+                            .onChange(of: chatManager.getCurrentMessages().count) { _, count in
+                                handleScroll(proxy: proxy, newCount: count)
+                            }
+                            .onChange(of: chatManager.currentSessionId) { _, _ in
+                                handleScroll(proxy: proxy)
+                            }
+                            .onChange(of: isLoading) { _, loading in
+                                if loading {
+                                    withAnimation {
+                                        proxy.scrollTo("typingIndicator", anchor: .bottom)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(minWidth: 800, minHeight: 500)
+        .popover(isPresented: $showSettings) {
+            SettingsView(
+                geminiKey: $geminiKey,
+                geminiModel: $geminiModel,
+                ollamaURL: $ollamaURL,
+                ollamaModel: $ollamaModel,
+                shortcutPrivateCloud: $shortcutPrivateCloud,
+                shortcutOnDevice: $shortcutOnDevice,
+                shortcutChatGPT: $shortcutChatGPT,
+                shortcutImageGen: $shortcutImageGen,
+                backgroundImagePath: $backgroundImagePath
+            )
+            .environmentObject(chatManager)
+        }
+        .disabled(showSplash) // Disable main content when splash is showing to prevent focus ring bleed-through
+        .toolbar(showSplash ? .hidden : .visible, for: .windowToolbar)
+        
+        if !hasSeenWelcome {
+            WelcomeView {
+                withAnimation {
+                    hasSeenWelcome = true
+                }
+            }
+            .transition(.opacity)
+            .zIndex(100)
+        }
+        
+        if showSplash {
+            SplashScreen {
+                showSplash = false
+            }
+            .transition(.opacity)
+            .zIndex(200)
+        }
+        }
+    }
+    
+    func isWebViewProvider(_ provider: String) -> Bool {
+        return ["Gemini Web", "ChatGPT Web", "Perplexity Web", "Grok Web"].contains(provider)
+    }
+    
+    func getWebURL(for provider: String) -> URL? {
+        switch provider {
+        case "Gemini Web": return URL(string: "https://gemini.google.com")
+        case "ChatGPT Web": return URL(string: "https://chatgpt.com")
+        case "Perplexity Web": return URL(string: "https://www.perplexity.ai")
+        case "Grok Web": return URL(string: "https://grok.com")
+        default: return nil
+        }
+    }
+    
+    func handleScroll(proxy: ScrollViewProxy, newCount: Int? = nil) {
+        let currentCount = newCount ?? chatManager.getCurrentMessages().count
+        
+        if chatManager.currentSessionId != lastSessionId {
+            // Session Switch
+            lastSessionId = chatManager.currentSessionId
+            lastMessageCount = currentCount
+            
+            // Jump to bottom (No Animation) to prevent freeze on large lists
+            if let lastId = chatManager.getCurrentMessages().last?.id {
+                proxy.scrollTo(lastId, anchor: .bottom)
+            }
+        } else {
+            // Same Session
+            if currentCount > lastMessageCount {
+                // New Message -> Animate
+                if let lastId = chatManager.getCurrentMessages().last?.id {
+                    withAnimation {
+                        proxy.scrollTo(lastId, anchor: .bottom)
+                    }
+                }
+            }
+            lastMessageCount = currentCount
+        }
+    }
+    
+    func selectImage() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.image]
+        if panel.runModal() == .OK, let url = panel.url {
+            selectedImage = NSImage(contentsOf: url)
+        }
+    }
+    
+    func sendMessage() {
+        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedImage != nil else { return }
+        
+        let userMsg = Message(content: inputText, image: selectedImage, isUser: true)
+        chatManager.addMessage(userMsg)
+        
+        let currentInput = inputText
+        let currentImage = selectedImage
+        
+        inputText = ""
+        selectedImage = nil
+        
+        performSend(input: currentInput, image: currentImage)
+    }
+    
+    func regenerateResponse(for messageId: UUID? = nil) {
+        if let messageId = messageId {
+            chatManager.truncateHistory(from: messageId)
+        } else {
+            let messages = chatManager.getCurrentMessages()
+            guard let lastMsg = messages.last, !lastMsg.isUser else { return }
+            chatManager.removeLastMessage()
+        }
+        
+        // Find last user message
+        if let lastUserMsg = chatManager.getCurrentMessages().last(where: { $0.isUser }) {
+            performSend(input: lastUserMsg.content, image: lastUserMsg.image)
+        }
+    }
+    
+    func performSend(input: String, image: NSImage?) {
+        isLoading = true
+        let currentHistory = chatManager.getCurrentMessages()
+        
+        Task {
+            if selectedProvider == "Image Creation" {
+                do {
+                    let result = try await shortcutService.runShortcut(name: shortcutImageGen, input: input, image: nil)
+                    DispatchQueue.main.async {
+                        let aiMsg = Message(content: result.0, image: result.1, isUser: false)
+                        self.chatManager.addMessage(aiMsg)
+                        self.isLoading = false
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        let aiMsg = Message(content: "Error: \(error.localizedDescription)", isUser: false)
+                        self.chatManager.addMessage(aiMsg)
+                        self.isLoading = false
+                    }
+                }
+            } else if selectedProvider == "Gemini API" {
+                if !geminiKey.isEmpty {
+                    let aiMsgId = UUID()
+                    var aiMsg = Message(content: "", isUser: false)
+                    aiMsg.id = aiMsgId
+                    
+                    DispatchQueue.main.async {
+                        self.chatManager.addMessage(aiMsg)
+                    }
+                    
+                    do {
+                        var fullContent = ""
+                        for try await chunk in geminiService.sendMessageStream(history: currentHistory, apiKey: geminiKey, model: geminiModel) {
+                            fullContent += chunk
+                            let contentToUpdate = fullContent
+                            DispatchQueue.main.async {
+                                self.chatManager.updateMessage(id: aiMsgId, content: contentToUpdate)
+                            }
+                        }
+                        DispatchQueue.main.async {
+                            self.chatManager.finalizeMessageUpdate()
+                            self.isLoading = false
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self.chatManager.updateMessage(id: aiMsgId, content: "Error: \(error.localizedDescription)")
+                            self.chatManager.finalizeMessageUpdate()
+                            self.isLoading = false
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        let aiMsg = Message(content: "Please enter your Gemini API Key in settings.", isUser: false)
+                        self.chatManager.addMessage(aiMsg)
+                        self.isLoading = false
+                    }
+                }
+            } else if selectedProvider == "Ollama" {
+                let aiMsgId = UUID()
+                var aiMsg = Message(content: "", isUser: false)
+                aiMsg.id = aiMsgId
+                
+                DispatchQueue.main.async {
+                    self.chatManager.addMessage(aiMsg)
+                }
+                
+                do {
+                    var fullContent = ""
+                    var fullThinking = ""
+                    
+                    for try await (contentChunk, thinkingChunk) in ollamaService.sendMessageStream(history: currentHistory, endpoint: ollamaURL, model: ollamaModel) {
+                        fullContent += contentChunk
+                        if let thinking = thinkingChunk {
+                            fullThinking += thinking
+                        }
+                        
+                        let contentToUpdate = fullContent
+                        let thinkingToUpdate = fullThinking.isEmpty ? nil : fullThinking
+                        
+                        DispatchQueue.main.async {
+                            self.chatManager.updateMessage(id: aiMsgId, content: contentToUpdate, thinkingContent: thinkingToUpdate)
+                        }
+                    }
+                    DispatchQueue.main.async {
+                        self.chatManager.finalizeMessageUpdate()
+                        self.isLoading = false
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.chatManager.updateMessage(id: aiMsgId, content: "Error: \(error.localizedDescription)")
+                        self.chatManager.finalizeMessageUpdate()
+                        self.isLoading = false
+                    }
+                }
+            } else {
+                // Shortcuts
+                let shortcutName: String
+                switch selectedProvider {
+                case "Private Cloud": shortcutName = shortcutPrivateCloud
+                case "On-Device": shortcutName = shortcutOnDevice
+                case "ChatGPT": shortcutName = shortcutChatGPT
+                default: shortcutName = shortcutPrivateCloud
+                }
+                
+                // Build transcript for shortcuts
+                var transcript = "Please reply to the last message:\n\n"
+                for msg in currentHistory.suffix(10) {
+                    let role = msg.isUser ? "User" : "Assistant"
+                    transcript += "\(role): \(msg.content)\n"
+                }
+                transcript += "Assistant:"
+                
+                do {
+                    let result = try await shortcutService.runShortcut(name: shortcutName, input: transcript, image: image)
+                    DispatchQueue.main.async {
+                        let aiMsg = Message(content: result.0, image: result.1, isUser: false)
+                        self.chatManager.addMessage(aiMsg)
+                        self.isLoading = false
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        let aiMsg = Message(content: "Error: \(error.localizedDescription)", isUser: false)
+                        self.chatManager.addMessage(aiMsg)
+                        self.isLoading = false
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct SidebarView: View {
+    @ObservedObject var chatManager: ChatManager
+    
+    var body: some View {
+        List(selection: $chatManager.currentSessionId) {
+            ForEach(chatManager.sessions) { session in
+                Text(session.title)
+                    .tag(session.id)
+                    .contextMenu {
+                        if !session.messages.isEmpty {
+                            Button("Delete") {
+                                chatManager.deleteSession(id: session.id)
+                            }
+                        }
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        if !session.messages.isEmpty {
+                            Button(role: .destructive) {
+                                chatManager.deleteSession(id: session.id)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+            }
+        }
+        .listStyle(.sidebar)
+        .navigationTitle("Chats")
+    }
+}
+
+struct HeaderView: View {
+    @Binding var selectedProvider: String
+    @Binding var showSettings: Bool
+    var onNewChat: () -> Void
+    
+    var body: some View {
+        HStack {
+            Picker("Model", selection: $selectedProvider) {
+                Section("API") {
+                    Text("Gemini API").tag("Gemini API")
+                    Text("Ollama").tag("Ollama")
+                }
+                Section("Shortcuts") {
+                    Text("Private Cloud").tag("Private Cloud")
+                    Text("On-Device").tag("On-Device")
+                    Text("ChatGPT").tag("ChatGPT")
+                }
+                Section("Web View") {
+                    Text("Gemini Web").tag("Gemini Web")
+                    Text("ChatGPT Web").tag("ChatGPT Web")
+                    Text("Perplexity Web").tag("Perplexity Web")
+                    Text("Grok Web").tag("Grok Web")
+                }
+                Section("Tools") {
+                    Text("Image Creation").tag("Image Creation")
+                }
+            }
+            .frame(width: 250)
+            .focusEffectDisabled()
+            
+            Spacer()
+            
+            if !["Gemini Web", "ChatGPT Web", "Perplexity Web", "Grok Web"].contains(selectedProvider) {
+                Button(action: onNewChat) {
+                    HStack {
+                        Image(systemName: "plus")
+                        Text("New Chat")
+                    }
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(20)
+                }
+                .buttonStyle(.plain)
+                
+                Button(action: { showSettings = true }) {
+                    Image(systemName: "gearshape.fill")
+                        .foregroundColor(.secondary)
+                        .padding(8)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding()
+        // Transparent background
+    }
+}
+
+struct InputView: View {
+    @Binding var inputText: String
+    @Binding var selectedImage: NSImage?
+    var isLoading: Bool
+    var onSend: () -> Void
+    var onSelectImage: () -> Void
+    var isImageGen: Bool
+    
+    @FocusState private var isFocused: Bool
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            if let image = selectedImage {
+                HStack {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 60, height: 60)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    
+                    VStack(alignment: .leading) {
+                        Text("Image attached").font(.caption).bold()
+                        Button("Remove") { selectedImage = nil }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                    }
+                    Spacer()
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+            }
+            
+            HStack(spacing: 12) {
+                if !isImageGen {
+                    Button(action: onSelectImage) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                ZStack(alignment: .leading) {
+                    if inputText.isEmpty && !isFocused {
+                        Text(isImageGen ? "Describe image to generate..." : "Ask AI anything...")
+                            .font(.system(size: 16))
+                            .foregroundColor(.secondary)
+                            .allowsHitTesting(false)
+                    }
+                    
+                    TextField("", text: $inputText)
+                        .focused($isFocused)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 16))
+                        .onSubmit(onSend)
+                }
+                
+                Button(action: onSend) {
+                    Image(systemName: isImageGen ? "paintbrush.fill" : "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(inputText.isEmpty && selectedImage == nil ? Color.gray.gradient : Color.blue.gradient)
+                }
+                .buttonStyle(.plain)
+                .disabled((inputText.isEmpty && selectedImage == nil) || isLoading)
+            }
+            .padding(12)
+            .background(.ultraThinMaterial)
+            .background(Color.white.opacity(0.05))
+            .cornerRadius(30)
+            .overlay(
+                RoundedRectangle(cornerRadius: 30)
+                    .stroke(LinearGradient(colors: [.white.opacity(0.3), .white.opacity(0.1)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+        }
+        .padding()
+    }
+}
+
+struct ThumbnailView: View {
+    let image: NSImage
+    let maxWidth: CGFloat
+    let maxHeight: CGFloat
+    
+    @State private var thumbnail: NSImage?
+    
+    var body: some View {
+        Group {
+            if let thumb = thumbnail {
+                Image(nsImage: thumb)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: maxWidth, maxHeight: maxHeight)
+                    .cornerRadius(12)
+            } else {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 200, height: 200)
+                    .cornerRadius(12)
+                    .onAppear {
+                        generateThumbnail()
+                    }
+            }
+        }
+    }
+    
+    private func generateThumbnail() {
+        Task {
+            let targetSize = NSSize(width: maxWidth * 2, height: maxHeight * 2) // Retina
+            let thumb = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let newImage = NSImage(size: targetSize)
+                    newImage.lockFocus()
+                    image.draw(in: NSRect(origin: .zero, size: targetSize),
+                               from: NSRect(origin: .zero, size: image.size),
+                               operation: .copy,
+                               fraction: 1.0)
+                    newImage.unlockFocus()
+                    continuation.resume(returning: newImage)
+                }
+            }
+            await MainActor.run {
+                self.thumbnail = thumb
+            }
+        }
+    }
+}
+
+struct MathView: NSViewRepresentable {
+    var equation: String
+    var fontSize: CGFloat = 20
+    
+    func makeNSView(context: Context) -> MTMathUILabel {
+        let view = MTMathUILabel()
+        view.textAlignment = .left
+        view.fontSize = fontSize
+        view.textColor = NSColor.labelColor
+        return view
+    }
+    
+    func updateNSView(_ uiView: MTMathUILabel, context: Context) {
+        uiView.latex = equation
+        uiView.fontSize = fontSize
+        uiView.textColor = NSColor.labelColor
+    }
+}
+
+struct MarkdownView: View, Equatable {
+    let blocks: [MarkdownBlock]
+    
+    static func == (lhs: MarkdownView, rhs: MarkdownView) -> Bool {
+        return lhs.blocks == rhs.blocks
+    }
+    
+    private func renderRichText(_ text: String) -> Text {
+        return Text(parseMarkdownToAttributedString(text))
+    }
+    
+    private func parseMarkdownToAttributedString(_ text: String) -> AttributedString {
+        let displayDelimiters = ["$$", "\\["]
+        
+        var firstMatch: (delimiter: String, range: Range<String.Index>)? = nil
+        
+        for delim in displayDelimiters {
+            if let range = text.range(of: delim) {
+                if let current = firstMatch {
+                    if range.lowerBound < current.range.lowerBound {
+                        firstMatch = (delim, range)
+                    }
+                } else {
+                    firstMatch = (delim, range)
+                }
+            }
+        }
+        
+        if let match = firstMatch {
+            let delimiter = match.delimiter
+            let range = match.range
+            let closingDelimiter = (delimiter == "\\[") ? "\\]" : "$$"
+            
+            let prefix = text[..<range.lowerBound]
+            let remainder = text[range.upperBound...]
+            
+            if let endRange = remainder.range(of: closingDelimiter) {
+                let mathContent = String(remainder[..<endRange.lowerBound])
+                let suffix = String(remainder[endRange.upperBound...])
+                
+                return parseInlineMarkdown(String(prefix))
+                    + mathText(mathContent, display: true)
+                    + parseMarkdownToAttributedString(suffix)
+            }
+        }
+        
+        return parseInlineMarkdown(text)
+    }
+    
+    private func parseInlineMarkdown(_ text: String) -> AttributedString {
+        let delimiters = ["**", "*", "`", "\\(", "$", "\\textbf{", "\\textit{", "\\underline{", "\\emph{", "\\texttt{"]
+        
+        var firstMatch: (delimiter: String, range: Range<String.Index>)? = nil
+        
+        for delim in delimiters {
+            if let range = text.range(of: delim) {
+                if let current = firstMatch {
+                    if range.lowerBound < current.range.lowerBound {
+                        firstMatch = (delim, range)
+                    } else if range.lowerBound == current.range.lowerBound {
+                        // Prefer longer delimiter (e.g. "**" over "*")
+                        if delim.count > current.delimiter.count {
+                            firstMatch = (delim, range)
+                        }
+                    }
+                } else {
+                    firstMatch = (delim, range)
+                }
+            }
+        }
+        
+        if let match = firstMatch {
+            let delimiter = match.delimiter
+            let range = match.range
+            
+            let closingDelimiter: String
+            if delimiter == "**" { closingDelimiter = "**" }
+            else if delimiter == "*" { closingDelimiter = "*" }
+            else if delimiter == "`" { closingDelimiter = "`" }
+            else if delimiter == "\\(" { closingDelimiter = "\\)" }
+            else if delimiter == "$" { closingDelimiter = "$" }
+            else { closingDelimiter = "}" }
+            
+            let prefix = text[..<range.lowerBound]
+            let remainder = text[range.upperBound...]
+            
+            if let endRange = remainder.range(of: closingDelimiter) {
+                let content = String(remainder[..<endRange.lowerBound])
+                let suffix = String(remainder[endRange.upperBound...])
+                
+                if delimiter == "**" || delimiter == "\\textbf{" {
+                    var boldStr = parseInlineMarkdown(content)
+                    boldStr.font = .system(size: 15, weight: .bold)
+                    return parseInlineMarkdown(String(prefix)) + boldStr + parseInlineMarkdown(suffix)
+                } else if delimiter == "*" || delimiter == "\\textit{" || delimiter == "\\emph{" {
+                    var italicStr = parseInlineMarkdown(content)
+                    italicStr.font = .system(size: 15).italic()
+                    return parseInlineMarkdown(String(prefix)) + italicStr + parseInlineMarkdown(suffix)
+                } else if delimiter == "\\underline{" {
+                    var underlineStr = parseInlineMarkdown(content)
+                    underlineStr.underlineStyle = .single
+                    return parseInlineMarkdown(String(prefix)) + underlineStr + parseInlineMarkdown(suffix)
+                } else if delimiter == "`" || delimiter == "\\texttt{" {
+                    var codeStr = AttributedString(content)
+                    codeStr.font = .system(size: 15, design: .monospaced)
+                    if delimiter == "`" {
+                        codeStr.backgroundColor = .gray.opacity(0.2)
+                    }
+                    return parseInlineMarkdown(String(prefix)) + codeStr + parseInlineMarkdown(suffix)
+                } else {
+                    // Math (inline)
+                    let formattedContent = formatInlineMath(content)
+                    
+                    return parseInlineMarkdown(String(prefix))
+                        + AttributedString(formattedContent)
+                        + parseInlineMarkdown(suffix)
+                }
+            }
+        }
+        
+        return AttributedString(text)
+    }
+    
+    private func formatInlineMath(_ latex: String) -> String {
+        var content = latex
+        
+        // Fix common typos
+        content = content.replacingOccurrences(of: "\\tfrac", with: "\\frac")
+        content = content.replacingOccurrences(of: "\\trac", with: "\\frac")
+        
+        // Remove sizing commands
+        let sizingCommands = ["\\big", "\\Big", "\\bigg", "\\Bigg"]
+        for cmd in sizingCommands {
+            content = content.replacingOccurrences(of: cmd, with: "")
+        }
+        
+        // Handle \text{...} and \mathrm{...}
+        content = replaceTextCommand(content)
+        
+        // Handle symbols
+        content = content.replacingOccurrences(of: "\\Delta", with: "Δ")
+        content = content.replacingOccurrences(of: "\\cdot", with: "·")
+        content = content.replacingOccurrences(of: "\\times", with: "×")
+        content = content.replacingOccurrences(of: "\\pm", with: "±")
+        content = content.replacingOccurrences(of: "\\neq", with: "≠")
+        content = content.replacingOccurrences(of: "\\approx", with: "≈")
+        content = content.replacingOccurrences(of: "\\leq", with: "≤")
+        content = content.replacingOccurrences(of: "\\geq", with: "≥")
+        content = content.replacingOccurrences(of: "\\pi", with: "π")
+        
+        // Handle \frac{num}{den}
+        content = replaceFrac(content)
+        
+        // Handle superscripts
+        content = replaceSuperscripts(content)
+        
+        // Cleanup
+        content = content
+            .replacingOccurrences(of: "{", with: "")
+            .replacingOccurrences(of: "}", with: "")
+            .replacingOccurrences(of: "\\", with: "")
+            
+        return content
+    }
+    
+    private func replaceTextCommand(_ text: String) -> String {
+        var newText = text
+        let pattern = "\\\\(?:text|mathrm|textbf|textit|underline|emph|texttt|mathbf|mathit)\\{([^}]+)\\}"
+        
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            let nsString = newText as NSString
+            let results = regex.matches(in: newText, range: NSRange(location: 0, length: nsString.length))
+            
+            for result in results.reversed() {
+                if result.numberOfRanges == 2 {
+                    let content = nsString.substring(with: result.range(at: 1))
+                    if let r = Range(result.range(at: 0), in: newText) {
+                        newText.replaceSubrange(r, with: content)
+                    }
+                }
+            }
+        }
+        return newText
+    }
+    
+    private func replaceSuperscripts(_ text: String) -> String {
+        var newText = text
+        
+        // Map of standard chars to superscripts
+        let map: [Character: String] = [
+            "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+            "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+            "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+            "n": "ⁿ", "i": "ⁱ", "x": "ˣ", "y": "ʸ", "z": "ᶻ"
+        ]
+        
+        func convertToSuper(_ str: String) -> String {
+            return str.map { map[$0] ?? String($0) }.joined()
+        }
+        
+        // 1. Handle ^{...}
+        let bracePattern = "\\^\\{([^}]+)\\}"
+        if let regex = try? NSRegularExpression(pattern: bracePattern) {
+            let nsString = newText as NSString
+            let results = regex.matches(in: newText, range: NSRange(location: 0, length: nsString.length))
+            
+            for result in results.reversed() {
+                if result.numberOfRanges == 2 {
+                    let content = nsString.substring(with: result.range(at: 1))
+                    let superStr = convertToSuper(content)
+                    if let r = Range(result.range(at: 0), in: newText) {
+                        newText.replaceSubrange(r, with: superStr)
+                    }
+                }
+            }
+        }
+        
+        // 2. Handle ^x (single char)
+        let charPattern = "\\^([0-9a-zA-Z+\\-])"
+        if let regex = try? NSRegularExpression(pattern: charPattern) {
+            let nsString = newText as NSString
+            let results = regex.matches(in: newText, range: NSRange(location: 0, length: nsString.length))
+            
+            for result in results.reversed() {
+                if result.numberOfRanges == 2 {
+                    let content = nsString.substring(with: result.range(at: 1))
+                    let superStr = convertToSuper(content)
+                    if let r = Range(result.range(at: 0), in: newText) {
+                        newText.replaceSubrange(r, with: superStr)
+                    }
+                }
+            }
+        }
+        
+        return newText
+    }
+    
+    private func replaceFrac(_ text: String) -> String {
+        var newText = text
+        
+        // 1. Handle \frac{a}{b}
+        let bracePattern = "\\\\frac\\{([^}]+)\\}\\{([^}]+)\\}"
+        if let regex = try? NSRegularExpression(pattern: bracePattern) {
+            let nsString = newText as NSString
+            let results = regex.matches(in: newText, range: NSRange(location: 0, length: nsString.length))
+            
+            for result in results.reversed() {
+                if result.numberOfRanges == 3 {
+                    let num = nsString.substring(with: result.range(at: 1))
+                    let den = nsString.substring(with: result.range(at: 2))
+                    
+                    let numStr = shouldParenthesize(num) ? "(\(num))" : num
+                    let denStr = shouldParenthesize(den) ? "(\(den))" : den
+                    
+                    let replacement = "\(numStr)/\(denStr)"
+                    
+                    if let r = Range(result.range(at: 0), in: newText) {
+                        newText.replaceSubrange(r, with: replacement)
+                    }
+                }
+            }
+        }
+        
+        // 2. Handle \frac12 (single digits)
+        let digitPattern = "\\\\frac(\\d)(\\d)"
+        if let regex = try? NSRegularExpression(pattern: digitPattern) {
+            let nsString = newText as NSString
+            let results = regex.matches(in: newText, range: NSRange(location: 0, length: nsString.length))
+            
+            for result in results.reversed() {
+                if result.numberOfRanges == 3 {
+                    let num = nsString.substring(with: result.range(at: 1))
+                    let den = nsString.substring(with: result.range(at: 2))
+                    
+                    let replacement = "\(num)/\(den)"
+                    
+                    if let r = Range(result.range(at: 0), in: newText) {
+                        newText.replaceSubrange(r, with: replacement)
+                    }
+                }
+            }
+        }
+        
+        return newText
+    }
+    
+    private func shouldParenthesize(_ text: String) -> Bool {
+        // Add parenthesis if there are multiple terms (contains + or -)
+        return text.contains("+") || text.contains("-")
+    }
+    
+    private func cleanLatex(_ latex: String) -> String {
+        var content = latex
+        
+        // Fix common typos
+        content = content.replacingOccurrences(of: "\\tfrac", with: "\\frac")
+        content = content.replacingOccurrences(of: "\\trac", with: "\\frac")
+        
+        // Remove sizing commands
+        let sizingCommands = ["\\big", "\\Big", "\\bigg", "\\Bigg"]
+        for cmd in sizingCommands {
+            content = content.replacingOccurrences(of: cmd, with: "")
+        }
+        
+        // Strip \boxed{...}
+        if content.contains("\\boxed{") {
+            content = content.replacingOccurrences(of: "\\boxed{", with: "")
+            if content.hasSuffix("}") {
+                content = String(content.dropLast())
+            }
+        }
+        
+        return content
+    }
+    
+    private func isLatexValid(_ latex: String) -> Bool {
+        return MTMathListBuilder.build(fromString: latex) != nil
+    }
+    
+    private func mathText(_ latex: String, display: Bool) -> AttributedString {
+        let cleanLatex = cleanLatex(latex)
+        
+        // Check validity
+        if !isLatexValid(cleanLatex) {
+            let delimiter = display ? "$$" : "$"
+            return AttributedString("\(delimiter)\(latex)\(delimiter)")
+        }
+        
+        let fontSize: CGFloat = display ? 22 : 15
+        let labelMode: MTMathUILabelMode = display ? .display : .text
+        let mathImage = MTMathImage(latex: cleanLatex, fontSize: fontSize, textColor: .labelColor, labelMode: labelMode)
+        
+        let (_, image) = mathImage.asImage()
+        if let img = image {
+            if img.size.width > 0 && img.size.height > 0 {
+                let attachment = NSTextAttachment()
+                attachment.image = img
+                attachment.bounds = CGRect(x: 0, y: display ? -2.0 : -3.5, width: img.size.width, height: img.size.height)
+                
+                let nsAttrStr = NSMutableAttributedString(attachment: attachment)
+                
+                if display {
+                    let paragraphStyle = NSMutableParagraphStyle()
+                    paragraphStyle.alignment = .center
+                    nsAttrStr.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: nsAttrStr.length))
+                    
+                    let attrStr = AttributedString(nsAttrStr)
+                    return AttributedString("\n") + attrStr + AttributedString("\n")
+                }
+                
+                return AttributedString(nsAttrStr)
+            }
+        }
+        
+        let delimiter = display ? "$$" : "$"
+        return AttributedString("\(delimiter)\(latex)\(delimiter)")
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(blocks, id: \.id) { block in
+                switch block.type {
+                case .text(let text):
+                    renderRichText(text)
+                        .font(.system(size: 15))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .code(let code, let language):
+                    VStack(alignment: .leading, spacing: 0) {
+                        if !language.isEmpty {
+                            Text(language)
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundColor(.gray)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 4)
+                                .background(Color.black.opacity(0.2))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        ScrollView(.horizontal, showsIndicators: true) {
+                            Text(code)
+                                .font(.system(.body, design: .monospaced))
+                                .padding(12)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .background(Color.black.opacity(0.1))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+                case .heading(let text, let level):
+                    renderRichText(text)
+                        .font(.system(size: level == 1 ? 24 : (level == 2 ? 20 : (level == 3 ? 18 : 16)), weight: .bold))
+                        .padding(.top, 8)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .divider:
+                    Divider()
+                        .padding(.vertical, 8)
+                case .bullet(let text):
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("•")
+                            .font(.system(size: 15))
+                        renderRichText(text)
+                            .font(.system(size: 15))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.leading, 8)
+                case .numbered(let text, let number):
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("\(number).")
+                            .font(.system(size: 15))
+                        renderRichText(text)
+                            .font(.system(size: 15))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.leading, 8)
+                case .blockquote(let text):
+                    HStack(spacing: 12) {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.5))
+                            .frame(width: 4)
+                        renderRichText(text)
+                            .font(.system(size: 15))
+                            .foregroundColor(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                case .math(let equation):
+                    let cleanEq = cleanLatex(equation)
+                    if isLatexValid(cleanEq) {
+                        HStack {
+                            Spacer()
+                            MathView(equation: cleanEq, fontSize: 18)
+                                .frame(minHeight: 30)
+                                .padding(.vertical, 8)
+                            Spacer()
+                        }
+                    } else {
+                        renderRichText(equation)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 8)
+                    }
+                case .table(let headers, let rows):
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                            // Header
+                            GridRow {
+                                ForEach(headers, id: \.self) { header in
+                                    renderRichText(header)
+                                        .font(.system(size: 14, weight: .bold))
+                                        .padding(12)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color.black.opacity(0.2))
+                                        .border(Color.gray.opacity(0.2), width: 0.5)
+                                }
+                            }
+                            
+                            // Rows
+                            ForEach(rows.indices, id: \.self) { i in
+                                GridRow {
+                                    ForEach(0..<headers.count, id: \.self) { j in
+                                        if j < rows[i].count {
+                                            renderRichText(rows[i][j])
+                                                .font(.system(size: 14))
+                                                .padding(12)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .border(Color.gray.opacity(0.2), width: 0.5)
+                                        } else {
+                                            Text("")
+                                                .padding(12)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .border(Color.gray.opacity(0.2), width: 0.5)
+                                        }
+                                    }
+                                }
+                                .background(i % 2 == 0 ? Color.clear : Color.black.opacity(0.05))
+                            }
+                        }
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct EmptyStateView: View {
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 60, height: 60)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [.blue, .teal],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .padding()
+                .background(
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+                )
+            
+            Text("Start a New Conversation")
+                .font(.title2)
+                .fontWeight(.semibold)
+            
+            Text("Type a message below to begin chatting.")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+    }
+}
+
+struct MessageView: View, Equatable {
+    let message: Message
+    var onRegenerate: (() -> Void)?
+    
+    @State private var isCopied = false
+    @State private var showImagePreview = false
+    
+    static func == (lhs: MessageView, rhs: MessageView) -> Bool {
+        return lhs.message == rhs.message
+    }
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if message.isUser {
+                Spacer()
+                VStack(alignment: .trailing) {
+                    if let image = message.image {
+                        ThumbnailView(image: image, maxWidth: 200, maxHeight: 300)
+                            .onTapGesture {
+                                showImagePreview = true
+                            }
+                    }
+                    Text(message.content)
+                        .padding(12)
+                        .background(Color.blue.opacity(0.2))
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(16)
+                }
+                .frame(maxWidth: 500, alignment: .trailing)
+            } else {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(LinearGradient(colors: [.blue, .green], startPoint: .top, endPoint: .bottom))
+                    .font(.title2)
+                    .frame(width: 30)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    if let thinking = message.thinkingContent {
+                        DisclosureGroup {
+                            Text(thinking)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .padding(8)
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } label: {
+                            Text("Thinking Process")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let image = message.image {
+                        ThumbnailView(image: image, maxWidth: 300, maxHeight: 300)
+                            .padding(.bottom, 4)
+                            .onTapGesture {
+                                showImagePreview = true
+                            }
+                    }
+                    if !message.content.isEmpty {
+                        MarkdownView(blocks: message.blocks)
+                            .equatable()
+                    }
+                    
+                    // Action Buttons
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            if let image = message.image {
+                                pasteboard.writeObjects([image])
+                            } else {
+                                pasteboard.setString(message.content, forType: .string)
+                            }
+                            isCopied = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                isCopied = false
+                            }
+                        }) {
+                            Label(isCopied ? "Copied" : "Copy", systemImage: isCopied ? "checkmark" : "doc.on.doc")
+                                .font(.caption)
+                                .foregroundColor(isCopied ? .green : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        if let onRegenerate = onRegenerate {
+                            Button(action: onRegenerate) {
+                                Label("Regenerate", systemImage: "arrow.counterclockwise")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.vertical, 4)
+        .sheet(isPresented: $showImagePreview) {
+            if let image = message.image {
+                ImagePreviewView(image: image)
+            }
+        }
+    }
+}
+
+struct ImagePreviewView: View {
+    let image: NSImage
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .padding()
+            
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title)
+                            .foregroundColor(.white)
+                            .padding()
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+        }
+        .frame(minWidth: 600, minHeight: 400)
+    }
+}
+
+struct SettingsView: View {
+    @Binding var geminiKey: String
+    @Binding var geminiModel: String
+    @Binding var ollamaURL: String
+    @Binding var ollamaModel: String
+    @Binding var shortcutPrivateCloud: String
+    @Binding var shortcutOnDevice: String
+    @Binding var shortcutChatGPT: String
+    @Binding var shortcutImageGen: String
+    @Binding var backgroundImagePath: String
+    @EnvironmentObject var chatManager: ChatManager
+    
+    let ollamaModels = [
+        "gpt-oss:120b-cloud",
+        "gpt-oss:20b-cloud",
+        "deepseek-v3.1:671b-cloud",
+        "qwen3-coder:480b-cloud",
+        "qwen3-vl:235b-cloud",
+        "minimax-m2:cloud",
+        "glm-4.6:cloud",
+        "qwen3-vl:235b-instruct-cloud",
+        "gpt-oss:120b",
+        "gpt-oss:20b",
+        "gemma3:27b",
+        "gemma3:12b",
+        "gemma3:4b",
+        "gemma3:1b",
+        "deepseek-r1:8b",
+        "qwen3-coder:30b",
+        "qwen3-vl:30b",
+        "qwen3-vl:8b",
+        "qwen3-vl:4b",
+        "qwen3:30b",
+        "qwen3:8b",
+        "qwen3:4b"
+    ]
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Settings").font(.title2).bold()
+                
+                Group {
+                    Text("Gemini API").font(.headline)
+                    TextField("API Key", text: $geminiKey).textFieldStyle(.roundedBorder)
+                    TextField("Model (e.g. gemini-1.5-pro)", text: $geminiModel).textFieldStyle(.roundedBorder)
+                }
+                
+                Divider()
+                
+                Group {
+                    Text("Ollama").font(.headline)
+                    TextField("Endpoint URL", text: $ollamaURL).textFieldStyle(.roundedBorder)
+                    Picker("Model", selection: $ollamaModel) {
+                        ForEach(ollamaModels, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+                }
+                
+                Divider()
+                
+                Group {
+                    Text("Shortcuts").font(.headline)
+                    Text("Enter the exact name of your Shortcuts.").font(.caption).foregroundColor(.secondary)
+                    
+                    LabeledContent("Private Cloud") { TextField("", text: $shortcutPrivateCloud) }
+                    LabeledContent("On-Device") { TextField("", text: $shortcutOnDevice) }
+                    LabeledContent("ChatGPT") { TextField("", text: $shortcutChatGPT) }
+                    LabeledContent("Image Gen") { TextField("", text: $shortcutImageGen) }
+                }
+                
+                Divider()
+                
+                Group {
+                    Text("Appearance").font(.headline)
+                    HStack {
+                        TextField("Background Image Path", text: $backgroundImagePath)
+                        Button("Browse") {
+                            let panel = NSOpenPanel()
+                            panel.allowedContentTypes = [.image]
+                            if panel.runModal() == .OK {
+                                backgroundImagePath = panel.url?.path ?? ""
+                            }
+                        }
+                    }
+                }
+                
+                Divider()
+                
+                Group {
+                    Text("Data").font(.headline)
+                    Button(role: .destructive) {
+                        chatManager.deleteAllSessions()
+                    } label: {
+                        Text("Clear All Chat History")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.large)
+                }
+            }
+            .padding()
+            .frame(width: 400)
+        }
+    }
+}
+
+// Helper
+struct TypingIndicator: View {
+    @State private var showDot1 = false
+    @State private var showDot2 = false
+    @State private var showDot3 = false
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().opacity(showDot1 ? 1 : 0.3).scaleEffect(showDot1 ? 1 : 0.8)
+            Circle().opacity(showDot2 ? 1 : 0.3).scaleEffect(showDot2 ? 1 : 0.8)
+            Circle().opacity(showDot3 ? 1 : 0.3).scaleEffect(showDot3 ? 1 : 0.8)
+        }
+        .foregroundColor(.gray)
+        .frame(width: 40, height: 20)
+        .onAppear {
+            withAnimation(Animation.easeInOut(duration: 0.5).repeatForever()) { showDot1.toggle() }
+            withAnimation(Animation.easeInOut(duration: 0.5).repeatForever().delay(0.2)) { showDot2.toggle() }
+            withAnimation(Animation.easeInOut(duration: 0.5).repeatForever().delay(0.4)) { showDot3.toggle() }
+        }
+    }
+}
+
+struct WelcomeView: View {
+    var onDismiss: () -> Void
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4).ignoresSafeArea()
+            
+            VStack(spacing: 30) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 80))
+                    .foregroundStyle(LinearGradient(colors: [.blue, .green], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .shadow(radius: 10)
+                
+                VStack(spacing: 10) {
+                    Text("Welcome to Prism")
+                        .font(.system(size: 40, weight: .bold))
+                    
+                    Text("Your All-in-One AI Assistant")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
+                }
+                
+                Button(action: onDismiss) {
+                    Text("Get Started")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(width: 200, height: 50)
+                        .background(Color.blue)
+                        .cornerRadius(25)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(50)
+            .background(.ultraThinMaterial)
+            .cornerRadius(30)
+            .shadow(radius: 20)
+        }
+    }
+}
+
+struct SplashScreen: View {
+    var onFinish: () -> Void
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        ZStack {
+            Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+            
+            VStack(spacing: 20) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(colors: [.cyan, .blue, .green], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        )
+                        .frame(width: 120, height: 120)
+                        .blur(radius: 20)
+                    
+                    Triangle()
+                        .stroke(colorScheme == .dark ? Color.black : Color.white, style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                        .frame(width: 80, height: 80)
+                        .offset(y: 5)
+                }
+                .scaleEffect(1.0)
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+                        // Pulse animation manually since symbolEffect doesn't work on custom views
+                    }
+                }
+                
+                Text("Prism")
+                    .font(.system(size: 60, weight: .thin))
+                    .foregroundStyle(LinearGradient(colors: [.cyan, .blue, .green], startPoint: .leading, endPoint: .trailing))
+            }
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                withAnimation(.easeOut(duration: 0.5)) {
+                    onFinish()
+                }
+            }
+        }
+    }
+}
+
+struct QuickChatView: View {
+    @StateObject private var chatManager = ChatManager() // Independent session for quick chat
+    @State private var inputText: String = ""
+    @State private var isLoading: Bool = false
+    @State private var selectedProvider: String = "Gemini API"
+    
+    // Settings (Read-only access to keys)
+    @AppStorage("GeminiKey") private var geminiKey: String = ""
+    @AppStorage("GeminiModel") private var geminiModel: String = "gemini-1.5-flash"
+    @AppStorage("OllamaURL") private var ollamaURL: String = "http://localhost:11434"
+    @AppStorage("OllamaModel") private var ollamaModel: String = "llama3"
+    @AppStorage("ShortcutPrivateCloud") private var shortcutPrivateCloud: String = "Ask AI Private"
+    @AppStorage("ShortcutOnDevice") private var shortcutOnDevice: String = "Ask AI Device"
+    @AppStorage("ShortcutChatGPT") private var shortcutChatGPT: String = "Ask ChatGPT"
+    
+    private let geminiService = GeminiService()
+    private let ollamaService = OllamaService()
+    private let shortcutService = ShortcutService()
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Quick Chat")
+                    .font(.headline)
+                Spacer()
+                
+                Button(action: {
+                    chatManager.deleteAllSessions() // For Quick Chat, we just clear everything
+                }) {
+                    Image(systemName: "square.and.pencil")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("New Chat")
+                
+                Picker("", selection: $selectedProvider) {
+                    Text("Gemini API").tag("Gemini API")
+                    Text("Ollama").tag("Ollama")
+                    Text("Private Cloud").tag("Private Cloud")
+                    Text("On-Device").tag("On-Device")
+                    Text("ChatGPT").tag("ChatGPT")
+                }
+                .labelsHidden()
+                .frame(width: 120)
+                .focusEffectDisabled()
+            }
+            .padding(10)
+            .background(.ultraThinMaterial)
+            
+            // Messages
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(chatManager.getCurrentMessages()) { message in
+                            MessageView(message: message)
+                        }
+                        if isLoading {
+                            HStack {
+                                Spacer()
+                                ProgressView()
+                                    .scaleEffect(0.5)
+                                Spacer()
+                            }
+                            .id("loading")
+                        }
+                    }
+                    .padding()
+                }
+                .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
+                    if let lastId = chatManager.getCurrentMessages().last?.id {
+                        withAnimation {
+                            proxy.scrollTo(lastId, anchor: .bottom)
+                        }
+                    }
+                }
+            }
+            
+            // Input
+            HStack {
+                TextField("Ask anything...", text: $inputText)
+                    .textFieldStyle(.plain)
+                    .onSubmit(sendMessage)
+                
+                Button(action: sendMessage) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+                .disabled(inputText.isEmpty || isLoading)
+            }
+            .padding(10)
+            .background(Color.black.opacity(0.1))
+        }
+        .frame(width: 350, height: 500)
+    }
+    
+    func sendMessage() {
+        guard !inputText.isEmpty else { return }
+        let content = inputText
+        inputText = ""
+        
+        let userMsg = Message(content: content, image: nil, isUser: true)
+        chatManager.addMessage(userMsg)
+        isLoading = true
+        
+        Task {
+            if selectedProvider == "Gemini API" {
+                if !geminiKey.isEmpty {
+                    let aiMsgId = UUID()
+                    var aiMsg = Message(content: "", isUser: false)
+                    aiMsg.id = aiMsgId
+                    
+                    DispatchQueue.main.async {
+                        self.chatManager.addMessage(aiMsg)
+                    }
+                    
+                    do {
+                        var fullContent = ""
+                        for try await chunk in geminiService.sendMessageStream(history: chatManager.getCurrentMessages(), apiKey: geminiKey, model: geminiModel) {
+                            fullContent += chunk
+                            let contentToUpdate = fullContent
+                            DispatchQueue.main.async {
+                                self.chatManager.updateMessage(id: aiMsgId, content: contentToUpdate)
+                            }
+                        }
+                        DispatchQueue.main.async {
+                            self.chatManager.finalizeMessageUpdate()
+                            self.isLoading = false
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self.chatManager.updateMessage(id: aiMsgId, content: "Error: \(error.localizedDescription)")
+                            self.chatManager.finalizeMessageUpdate()
+                            self.isLoading = false
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        let aiMsg = Message(content: "Please set your API Key in the main app.", isUser: false)
+                        self.chatManager.addMessage(aiMsg)
+                        self.isLoading = false
+                    }
+                }
+            } else if selectedProvider == "Ollama" {
+                let aiMsgId = UUID()
+                var aiMsg = Message(content: "", isUser: false)
+                aiMsg.id = aiMsgId
+                
+                DispatchQueue.main.async {
+                    self.chatManager.addMessage(aiMsg)
+                }
+                
+                do {
+                    var fullContent = ""
+                    var fullThinking = ""
+                    
+                    for try await (contentChunk, thinkingChunk) in ollamaService.sendMessageStream(history: chatManager.getCurrentMessages(), endpoint: ollamaURL, model: ollamaModel) {
+                        fullContent += contentChunk
+                        if let thinking = thinkingChunk {
+                            fullThinking += thinking
+                        }
+                        
+                        let contentToUpdate = fullContent
+                        let thinkingToUpdate = fullThinking.isEmpty ? nil : fullThinking
+                        
+                        DispatchQueue.main.async {
+                            self.chatManager.updateMessage(id: aiMsgId, content: contentToUpdate, thinkingContent: thinkingToUpdate)
+                        }
+                    }
+                    DispatchQueue.main.async {
+                        self.chatManager.finalizeMessageUpdate()
+                        self.isLoading = false
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.chatManager.updateMessage(id: aiMsgId, content: "Error: \(error.localizedDescription)")
+                        self.chatManager.finalizeMessageUpdate()
+                        self.isLoading = false
+                    }
+                }
+            } else {
+                // Shortcuts
+                let shortcutName: String
+                switch selectedProvider {
+                case "Private Cloud": shortcutName = shortcutPrivateCloud
+                case "On-Device": shortcutName = shortcutOnDevice
+                case "ChatGPT": shortcutName = shortcutChatGPT
+                default: shortcutName = shortcutPrivateCloud
+                }
+                
+                // Build transcript
+                var transcript = "Please reply to the last message:\n\n"
+                for msg in chatManager.getCurrentMessages().suffix(5) {
+                    let role = msg.isUser ? "User" : "Assistant"
+                    transcript += "\(role): \(msg.content)\n"
+                }
+                transcript += "Assistant:"
+                
+                do {
+                    let result = try await shortcutService.runShortcut(name: shortcutName, input: transcript, image: nil)
+                    DispatchQueue.main.async {
+                        let aiMsg = Message(content: result.0, image: nil, isUser: false)
+                        self.chatManager.addMessage(aiMsg)
+                        self.isLoading = false
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        let aiMsg = Message(content: "Error: \(error.localizedDescription)", isUser: false)
+                        self.chatManager.addMessage(aiMsg)
+                        self.isLoading = false
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
