@@ -591,7 +591,7 @@ class GeminiService {
                 request.addValue("application/json", forHTTPHeaderField: "Content-Type")
                 
                 // Convert history to Gemini format
-                var contents: [[String: Any]] = history.map { msg in
+                let contents: [[String: Any]] = history.map { msg in
                     var parts: [[String: Any]] = []
                     
                     if !msg.content.isEmpty {
@@ -2397,6 +2397,7 @@ struct QuickChatView: View {
     @AppStorage("GeminiModel") private var geminiModel: String = "gemini-1.5-flash"
     @AppStorage("OllamaURL") private var ollamaURL: String = "http://localhost:11434"
     @AppStorage("OllamaModel") private var ollamaModel: String = "llama3"
+    @AppStorage("SystemPrompt") private var systemPrompt: String = ""
     @AppStorage("ShortcutPrivateCloud") private var shortcutPrivateCloud: String = "Ask AI Private"
     @AppStorage("ShortcutOnDevice") private var shortcutOnDevice: String = "Ask AI Device"
     @AppStorage("ShortcutChatGPT") private var shortcutChatGPT: String = "Ask ChatGPT"
