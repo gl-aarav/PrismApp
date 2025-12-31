@@ -2170,6 +2170,7 @@ struct SettingsView: View {
     @Binding var shortcutImageGen: String
     @Binding var backgroundImagePath: String
     @AppStorage("SystemPrompt") private var systemPrompt: String = ""
+    @AppStorage("ShowMenuBar") private var showMenuBar = true
     @EnvironmentObject var chatManager: ChatManager
     
     let ollamaModels = [
@@ -2198,85 +2199,75 @@ struct SettingsView: View {
     ]
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("Settings").font(.title2).bold()
+        Form {
+            Section(header: Text("General")) {
+                Toggle("Show Menu Bar Icon", isOn: $showMenuBar)
                 
-                Group {
-                    Text("Gemini API").font(.headline)
-                    TextField("API Key", text: $geminiKey).textFieldStyle(.roundedBorder)
-                    TextField("Model (e.g. gemini-1.5-pro)", text: $geminiModel).textFieldStyle(.roundedBorder)
-                }
-                
-                Divider()
-                
-                Group {
-                    Text("System Prompt").font(.headline)
-                    Text("Instructions for how the AI should behave.").font(.caption).foregroundColor(.secondary)
-                    TextEditor(text: $systemPrompt)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(height: 100)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.2), lineWidth: 1))
-                }
-                
-                Divider()
-                
-                Group {
-                    Text("Ollama").font(.headline)
-                    TextField("Endpoint URL", text: $ollamaURL).textFieldStyle(.roundedBorder)
-                    Picker("Model", selection: $ollamaModel) {
-                        ForEach(ollamaModels, id: \.self) { model in
-                            Text(model).tag(model)
+                HStack {
+                    Text("Background Image")
+                    Spacer()
+                    TextField("Path", text: $backgroundImagePath)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Browse") {
+                        let panel = NSOpenPanel()
+                        panel.allowedContentTypes = [.image]
+                        if panel.runModal() == .OK {
+                            backgroundImagePath = panel.url?.path ?? ""
                         }
                     }
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity)
-                }
-                
-                Divider()
-                
-                Group {
-                    Text("Shortcuts").font(.headline)
-                    Text("Enter the exact name of your Shortcuts.").font(.caption).foregroundColor(.secondary)
-                    
-                    LabeledContent("Private Cloud") { TextField("", text: $shortcutPrivateCloud) }
-                    LabeledContent("On-Device") { TextField("", text: $shortcutOnDevice) }
-                    LabeledContent("ChatGPT") { TextField("", text: $shortcutChatGPT) }
-                    LabeledContent("Image Gen") { TextField("", text: $shortcutImageGen) }
-                }
-                
-                Divider()
-                
-                Group {
-                    Text("Appearance").font(.headline)
-                    HStack {
-                        TextField("Background Image Path", text: $backgroundImagePath)
-                        Button("Browse") {
-                            let panel = NSOpenPanel()
-                            panel.allowedContentTypes = [.image]
-                            if panel.runModal() == .OK {
-                                backgroundImagePath = panel.url?.path ?? ""
-                            }
-                        }
-                    }
-                }
-                
-                Divider()
-                
-                Group {
-                    Text("Data").font(.headline)
-                    Button(role: .destructive) {
-                        chatManager.deleteAllSessions()
-                    } label: {
-                        Text("Clear All Chat History")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .controlSize(.large)
                 }
             }
-            .padding()
-            .frame(width: 400)
+            
+            Section(header: Text("Gemini API")) {
+                TextField("API Key", text: $geminiKey)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Model (e.g. gemini-1.5-pro)", text: $geminiModel)
+                    .textFieldStyle(.roundedBorder)
+            }
+            
+            Section(header: Text("System Prompt")) {
+                TextEditor(text: $systemPrompt)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(height: 80)
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.2), lineWidth: 1))
+                Text("Instructions for how the AI should behave.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Section(header: Text("Ollama")) {
+                TextField("Endpoint URL", text: $ollamaURL)
+                    .textFieldStyle(.roundedBorder)
+                Picker("Model", selection: $ollamaModel) {
+                    ForEach(ollamaModels, id: \.self) { model in
+                        Text(model).tag(model)
+                    }
+                }
+            }
+            
+            Section(header: Text("Shortcuts")) {
+                TextField("Private Cloud", text: $shortcutPrivateCloud)
+                    .textFieldStyle(.roundedBorder)
+                TextField("On-Device", text: $shortcutOnDevice)
+                    .textFieldStyle(.roundedBorder)
+                TextField("ChatGPT", text: $shortcutChatGPT)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Image Gen", text: $shortcutImageGen)
+                    .textFieldStyle(.roundedBorder)
+            }
+            
+            Section {
+                Button(role: .destructive) {
+                    chatManager.deleteAllSessions()
+                } label: {
+                    Text("Clear All Chat History")
+                        .frame(maxWidth: .infinity)
+                }
+            }
         }
+        .formStyle(.grouped)
+        .frame(width: 500, height: 650)
+        .padding()
     }
 }
 
@@ -2439,7 +2430,7 @@ struct QuickChatView: View {
             
             // Messages
             ScrollViewReader { proxy in
-                ScrollView {
+                ScrollView([.vertical, .horizontal]) {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(chatManager.getCurrentMessages()) { message in
                             MessageView(message: message)
@@ -2455,6 +2446,7 @@ struct QuickChatView: View {
                         }
                     }
                     .padding()
+                    .frame(minWidth: 350, alignment: .leading)
                 }
                 .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
                     if let lastId = chatManager.getCurrentMessages().last?.id {
@@ -2466,9 +2458,10 @@ struct QuickChatView: View {
             }
             
             // Input
-            HStack {
-                TextField("Ask anything...", text: $inputText)
+            HStack(alignment: .bottom) {
+                TextField("Ask anything...", text: $inputText, axis: .vertical)
                     .textFieldStyle(.plain)
+                    .lineLimit(1...6)
                     .onSubmit(sendMessage)
                 
                 Button(action: sendMessage) {

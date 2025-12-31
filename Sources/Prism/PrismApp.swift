@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct PrismApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @AppStorage("ShowMenuBar") private var showMenuBar = true
 
     var body: some Scene {
         WindowGroup {
@@ -28,7 +29,7 @@ struct PrismApp: App {
             }
         }
         
-        MenuBarExtra("Prism", systemImage: "triangle") {
+        MenuBarExtra("Prism", systemImage: "triangle", isInserted: $showMenuBar) {
             QuickChatView()
         }
         .menuBarExtraStyle(.window)
@@ -36,6 +37,11 @@ struct PrismApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    
+    override init() {
+        super.init()
+        UserDefaults.standard.register(defaults: ["ShowMenuBar": true])
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Ensure the app is a regular app (shows in Dock, has UI)
