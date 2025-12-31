@@ -455,6 +455,15 @@ class ChatManager: ObservableObject {
 }
 
 class OllamaService {
+    private let session: URLSession
+    
+    init() {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 120
+        config.timeoutIntervalForResource = 300
+        self.session = URLSession(configuration: config)
+    }
+
     func sendMessageStream(history: [Message], endpoint: String, model: String) -> AsyncThrowingStream<(String, String?), Error> {
         return AsyncThrowingStream { continuation in
             Task {
@@ -489,7 +498,7 @@ class OllamaService {
                 
                 do {
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                    let (result, response) = try await URLSession.shared.bytes(for: request)
+                    let (result, response) = try await session.bytes(for: request)
                     
                     guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                         continuation.finish(throwing: URLError(.badServerResponse))
@@ -550,6 +559,15 @@ class OllamaService {
 }
 
 class GeminiService {
+    private let session: URLSession
+    
+    init() {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 120
+        config.timeoutIntervalForResource = 300
+        self.session = URLSession(configuration: config)
+    }
+
     func sendMessageStream(history: [Message], apiKey: String, model: String) -> AsyncThrowingStream<String, Error> {
         return AsyncThrowingStream { continuation in
             Task {
@@ -597,7 +615,7 @@ class GeminiService {
                 
                 do {
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                    let (result, response) = try await URLSession.shared.bytes(for: request)
+                    let (result, response) = try await session.bytes(for: request)
                     
                     guard let httpResponse = response as? HTTPURLResponse else {
                         continuation.finish(throwing: URLError(.badServerResponse))
@@ -1258,6 +1276,7 @@ struct InputView: View {
                 }
                 .padding()
                 .background(.ultraThinMaterial)
+                .cornerRadius(12)
             }
             
             HStack(spacing: 12) {
@@ -1276,13 +1295,25 @@ struct InputView: View {
                             .font(.system(size: 16))
                             .foregroundColor(.secondary)
                             .allowsHitTesting(false)
+                            .padding(.leading, 4)
                     }
                     
-                    TextField("", text: $inputText)
+                    TextField("", text: $inputText, axis: .vertical)
                         .focused($isFocused)
                         .textFieldStyle(.plain)
                         .font(.system(size: 16))
-                        .onSubmit(onSend)
+                        .lineLimit(1...10)
+                        .onKeyPress(.return) {
+                            if NSEvent.modifierFlags.contains(.shift) {
+                                return .ignored
+                            } else {
+                                onSend()
+                                return .handled
+                            }
+                        }
+                        .onPasteCommand(of: [.image, .fileURL]) { providers in
+                            handlePaste(providers)
+                        }
                 }
                 
                 Button(action: onSend) {
@@ -1305,6 +1336,35 @@ struct InputView: View {
             .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
         }
         .padding()
+        .onDrop(of: [.image, .fileURL], isTargeted: nil) { providers in
+            handlePaste(providers)
+            return true
+        }
+    }
+    
+    private func handlePaste(_ providers: [NSItemProvider]) {
+        for provider in providers {
+            if provider.canLoadObject(ofClass: NSImage.self) {
+                provider.loadObject(ofClass: NSImage.self) { image, _ in
+                    if let image = image as? NSImage {
+                        DispatchQueue.main.async {
+                            self.selectedImage = image
+                        }
+                    }
+                }
+            } else if provider.hasItemConformingToTypeIdentifier("public.file-url") {
+                provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { urlData, _ in
+                    if let urlData = urlData as? Data, let url = URL(dataRepresentation: urlData, relativeTo: nil) {
+                        // Handle file URL - for now just try to load as image
+                        if let image = NSImage(contentsOf: url) {
+                            DispatchQueue.main.async {
+                                self.selectedImage = image
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
