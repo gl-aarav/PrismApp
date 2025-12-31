@@ -577,7 +577,7 @@ class GeminiService {
         self.session = URLSession(configuration: config)
     }
 
-    func sendMessageStream(history: [Message], apiKey: String, model: String) -> AsyncThrowingStream<String, Error> {
+    func sendMessageStream(history: [Message], apiKey: String, model: String, systemPrompt: String = "") -> AsyncThrowingStream<String, Error> {
         return AsyncThrowingStream { continuation in
             Task {
                 let modelName = model.isEmpty ? "gemini-1.5-flash" : model
@@ -591,7 +591,7 @@ class GeminiService {
                 request.addValue("application/json", forHTTPHeaderField: "Content-Type")
                 
                 // Convert history to Gemini format
-                let contents: [[String: Any]] = history.map { msg in
+                var contents: [[String: Any]] = history.map { msg in
                     var parts: [[String: Any]] = []
                     
                     if !msg.content.isEmpty {
@@ -620,7 +620,15 @@ class GeminiService {
                     ]
                 }
                 
-                let body: [String: Any] = ["contents": contents]
+                var body: [String: Any] = ["contents": contents]
+                
+                if !systemPrompt.isEmpty {
+                    body["system_instruction"] = [
+                        "parts": [
+                            ["text": systemPrompt]
+                        ]
+                    ]
+                }
                 
                 do {
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -1064,7 +1072,7 @@ struct ContentView: View {
                     
                     do {
                         var fullContent = ""
-                        for try await chunk in geminiService.sendMessageStream(history: currentHistory, apiKey: geminiKey, model: geminiModel) {
+                        for try await chunk in geminiService.sendMessageStream(history: currentHistory, apiKey: geminiKey, model: geminiModel, systemPrompt: systemPrompt) {
                             fullContent += chunk
                             let contentToUpdate = fullContent
                             DispatchQueue.main.async {
@@ -1102,7 +1110,7 @@ struct ContentView: View {
                     var fullContent = ""
                     var fullThinking = ""
                     
-                    for try await (contentChunk, thinkingChunk) in ollamaService.sendMessageStream(history: currentHistory, endpoint: ollamaURL, model: ollamaModel) {
+                    for try await (contentChunk, thinkingChunk) in ollamaService.sendMessageStream(history: currentHistory, endpoint: ollamaURL, model: ollamaModel, systemPrompt: systemPrompt) {
                         fullContent += contentChunk
                         if let thinking = thinkingChunk {
                             fullThinking += thinking
@@ -1173,6 +1181,10 @@ struct SidebarView: View {
                     .tag(session.id)
                     .contextMenu {
                         if !session.messages.isEmpty {
+                            Button("Export Chat") {
+                                exportChat(session)
+                            }
+                            Divider()
                             Button("Delete") {
                                 chatManager.deleteSession(id: session.id)
                             }
@@ -1191,6 +1203,23 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("Chats")
+    }
+    
+    func exportChat(_ session: ChatSession) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "\(session.title).md"
+        panel.canCreateDirectories = true
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            var content = "# \(session.title)\n\n"
+            for msg in session.messages {
+                let role = msg.isUser ? "User" : "Assistant"
+                content += "### \(role)\n\(msg.content)\n\n"
+            }
+            
+            try? content.write(to: url, atomically: true, encoding: .utf8)
+        }
     }
 }
 
@@ -2476,7 +2505,7 @@ struct QuickChatView: View {
                     
                     do {
                         var fullContent = ""
-                        for try await chunk in geminiService.sendMessageStream(history: chatManager.getCurrentMessages(), apiKey: geminiKey, model: geminiModel) {
+                        for try await chunk in geminiService.sendMessageStream(history: chatManager.getCurrentMessages(), apiKey: geminiKey, model: geminiModel, systemPrompt: systemPrompt) {
                             fullContent += chunk
                             let contentToUpdate = fullContent
                             DispatchQueue.main.async {
@@ -2514,7 +2543,7 @@ struct QuickChatView: View {
                     var fullContent = ""
                     var fullThinking = ""
                     
-                    for try await (contentChunk, thinkingChunk) in ollamaService.sendMessageStream(history: chatManager.getCurrentMessages(), endpoint: ollamaURL, model: ollamaModel) {
+                    for try await (contentChunk, thinkingChunk) in ollamaService.sendMessageStream(history: chatManager.getCurrentMessages(), endpoint: ollamaURL, model: ollamaModel, systemPrompt: systemPrompt) {
                         fullContent += contentChunk
                         if let thinking = thinkingChunk {
                             fullThinking += thinking
