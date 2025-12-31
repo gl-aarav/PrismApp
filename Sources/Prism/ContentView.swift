@@ -464,7 +464,7 @@ class OllamaService {
         self.session = URLSession(configuration: config)
     }
 
-    func sendMessageStream(history: [Message], endpoint: String, model: String) -> AsyncThrowingStream<(String, String?), Error> {
+    func sendMessageStream(history: [Message], endpoint: String, model: String, systemPrompt: String = "") -> AsyncThrowingStream<(String, String?), Error> {
         return AsyncThrowingStream { continuation in
             Task {
                 let baseURL = endpoint.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -477,7 +477,16 @@ class OllamaService {
                 request.httpMethod = "POST"
                 request.addValue("application/json", forHTTPHeaderField: "Content-Type")
                 
-                let messages: [[String: Any]] = history.map { msg in
+                var messages: [[String: Any]] = []
+                
+                if !systemPrompt.isEmpty {
+                    messages.append([
+                        "role": "system",
+                        "content": systemPrompt
+                    ])
+                }
+                
+                messages.append(contentsOf: history.map { msg in
                     var message: [String: Any] = [
                         "role": msg.isUser ? "user" : "assistant",
                         "content": msg.content
@@ -488,7 +497,7 @@ class OllamaService {
                     }
                     
                     return message
-                }
+                })
                 
                 let body: [String: Any] = [
                     "model": model.isEmpty ? "llama3" : model,
@@ -797,6 +806,7 @@ struct ContentView: View {
     @AppStorage("ShortcutOnDevice") private var shortcutOnDevice: String = "Ask AI Device"
     @AppStorage("ShortcutChatGPT") private var shortcutChatGPT: String = "Ask ChatGPT"
     @AppStorage("ShortcutImageGen") private var shortcutImageGen: String = "Generate Image"
+    @AppStorage("SystemPrompt") private var systemPrompt: String = ""
     
     @AppStorage("BackgroundImagePath") private var backgroundImagePath: String = ""
     @AppStorage("hasSeenWelcome") private var hasSeenWelcome: Bool = false
@@ -1806,16 +1816,30 @@ struct MarkdownView: View, Equatable {
                         .fixedSize(horizontal: false, vertical: true)
                 case .code(let code, let language):
                     VStack(alignment: .leading, spacing: 0) {
-                        if !language.isEmpty {
-                            Text(language)
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .foregroundColor(.gray)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 4)
-                                .background(Color.black.opacity(0.2))
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            if !language.isEmpty {
+                                Text(language)
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.gray)
+                            }
+                            Spacer()
+                            Button(action: {
+                                let pasteboard = NSPasteboard.general
+                                pasteboard.clearContents()
+                                pasteboard.setString(code, forType: .string)
+                            }) {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Copy Code")
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.2))
+                        
                         ScrollView(.horizontal, showsIndicators: true) {
                             Text(code)
                                 .font(.system(.body, design: .monospaced))
@@ -2116,6 +2140,7 @@ struct SettingsView: View {
     @Binding var shortcutChatGPT: String
     @Binding var shortcutImageGen: String
     @Binding var backgroundImagePath: String
+    @AppStorage("SystemPrompt") private var systemPrompt: String = ""
     @EnvironmentObject var chatManager: ChatManager
     
     let ollamaModels = [
@@ -2152,6 +2177,17 @@ struct SettingsView: View {
                     Text("Gemini API").font(.headline)
                     TextField("API Key", text: $geminiKey).textFieldStyle(.roundedBorder)
                     TextField("Model (e.g. gemini-1.5-pro)", text: $geminiModel).textFieldStyle(.roundedBorder)
+                }
+                
+                Divider()
+                
+                Group {
+                    Text("System Prompt").font(.headline)
+                    Text("Instructions for how the AI should behave.").font(.caption).foregroundColor(.secondary)
+                    TextEditor(text: $systemPrompt)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(height: 100)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.2), lineWidth: 1))
                 }
                 
                 Divider()
