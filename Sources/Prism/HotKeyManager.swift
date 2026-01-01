@@ -22,12 +22,12 @@ class HotKeyManager {
                 return noErr
             }, 1, &eventType, nil, nil)
 
-        // Register Shift + Cmd + X
-        // kVK_ANSI_X = 0x07
-        let keyCode = UInt32(kVK_ANSI_X)
+        // Register Control + Space
+        // kVK_Space = 0x31
+        let keyCode = UInt32(kVK_Space)
 
-        // Modifiers: cmdKey + shiftKey
-        let modifiers = cmdKey | shiftKey
+        // Modifiers: controlKey
+        let modifiers = controlKey
 
         let hotKeyID = EventHotKeyID(signature: OSType(1111), id: 1)
 
@@ -37,7 +37,7 @@ class HotKeyManager {
         if status != noErr {
             print("Failed to register hotkey: \(status)")
         } else {
-            print("Registered Shift+Cmd+X hotkey")
+            print("Registered Control+Space hotkey")
         }
     }
 
