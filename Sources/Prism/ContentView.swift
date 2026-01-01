@@ -897,6 +897,7 @@ struct ContentView: View {
     @AppStorage("BackgroundImagePath") private var backgroundImagePath: String = ""
     @AppStorage("hasSeenWelcome") private var hasSeenWelcome: Bool = false
     @State private var showSplash: Bool = true
+    @State private var currentTask: Task<Void, Never>?
 
     private let geminiService = GeminiService()
     private let ollamaService = OllamaService()
@@ -987,6 +988,7 @@ struct ContentView: View {
                                         selectedImage: $selectedImage,
                                         isLoading: isLoading,
                                         onSend: sendMessage,
+                                        onStop: stopGeneration,
                                         onSelectImage: selectImage,
                                         isImageGen: selectedProvider == "Image Creation"
                                     )
@@ -1130,11 +1132,19 @@ struct ContentView: View {
         }
     }
 
+    func stopGeneration() {
+        currentTask?.cancel()
+        currentTask = nil
+        isLoading = false
+    }
+
     func performSend(input: String, image: NSImage?) {
         isLoading = true
         let currentHistory = chatManager.getCurrentMessages()
 
-        Task {
+        currentTask?.cancel()
+
+        currentTask = Task {
             if selectedProvider == "Image Creation" {
                 do {
                     let result = try await shortcutService.runShortcut(
@@ -1398,6 +1408,7 @@ struct InputView: View {
     @Binding var selectedImage: NSImage?
     var isLoading: Bool
     var onSend: () -> Void
+    var onStop: () -> Void
     var onSelectImage: () -> Void
     var isImageGen: Bool
 
@@ -1463,16 +1474,26 @@ struct InputView: View {
                         }
                 }
 
-                Button(action: onSend) {
-                    Image(systemName: isImageGen ? "paintbrush.fill" : "arrow.up.circle.fill")
-                        .font(.system(size: 28))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(
-                            inputText.isEmpty && selectedImage == nil
-                                ? Color.gray.gradient : Color.blue.gradient)
+                if isLoading {
+                    Button(action: onStop) {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 28))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Color.red.gradient)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button(action: onSend) {
+                        Image(systemName: isImageGen ? "paintbrush.fill" : "arrow.up.circle.fill")
+                            .font(.system(size: 28))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(
+                                inputText.isEmpty && selectedImage == nil
+                                    ? Color.gray.gradient : Color.blue.gradient)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled((inputText.isEmpty && selectedImage == nil) || isLoading)
                 }
-                .buttonStyle(.plain)
-                .disabled((inputText.isEmpty && selectedImage == nil) || isLoading)
             }
             .padding(12)
             .background(.ultraThinMaterial)
