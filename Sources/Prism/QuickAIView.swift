@@ -4,7 +4,7 @@ struct QuickAIView: View {
     var onResize: ((CGSize) -> Void)?
     var onClose: (() -> Void)?
 
-    @StateObject private var chatManager = ChatManager(fileName: "quick_ai_history.json")
+    @StateObject private var chatManager = ChatManager()
     @State private var inputText: String = ""
     @State private var isLoading: Bool = false
     @State private var selectedProvider: String = "Gemini API"
@@ -30,14 +30,35 @@ struct QuickAIView: View {
             if isExpanded {
                 // Header
                 HStack {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.blue, .green], startPoint: .topLeading,
-                                endPoint: .bottomTrailing))
-                    Text("Quick AI")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
+                    Menu {
+                        Picker("Model", selection: $selectedProvider) {
+                            Section("API") {
+                                Text("Gemini API").tag("Gemini API")
+                                Text("Ollama").tag("Ollama")
+                            }
+                            Section("Shortcuts") {
+                                Text("Private Cloud").tag("Private Cloud")
+                                Text("On-Device").tag("On-Device")
+                                Text("ChatGPT").tag("ChatGPT")
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: getProviderIcon(selectedProvider))
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [.blue, .green], startPoint: .topLeading,
+                                        endPoint: .bottomTrailing))
+                            Text(selectedProvider)
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
 
                     Spacer()
 
@@ -51,14 +72,6 @@ struct QuickAIView: View {
                     }
                     .buttonStyle(.plain)
                     .help("New Chat")
-
-                    // Open in Main App
-                    Button(action: openInMainApp) {
-                        Image(systemName: "arrow.up.right.square")
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open in Main App")
                 }
                 .padding()
                 .background(.ultraThinMaterial)
@@ -137,14 +150,6 @@ struct QuickAIView: View {
                 onResize?(CGSize(width: 700, height: 80))
             }
         }
-    }
-
-    func openInMainApp() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: { $0 != NSApp.keyWindow }) {
-            window.makeKeyAndOrderFront(nil)
-        }
-        onClose?()
     }
 
     func getProviderIcon(_ provider: String) -> String {
