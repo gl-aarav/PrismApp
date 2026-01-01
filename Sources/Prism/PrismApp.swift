@@ -37,8 +37,6 @@ struct PrismApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var quickAIWindow: NSPanel?
-
     override init() {
         super.init()
         UserDefaults.standard.register(defaults: ["ShowMenuBar": true, "EnableQuickAI": true])
@@ -51,9 +49,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Bring to front
         NSApp.activate(ignoringOtherApps: true)
 
-        // Force window to appear if needed
+        // Force main window to appear if needed
         DispatchQueue.main.async {
-            if let window = NSApp.windows.first {
+            // Find the main window (not the Quick AI panel)
+            if let window = NSApp.windows.first(where: { !($0 is QuickAIPanel) }) {
                 window.titlebarAppearsTransparent = true
                 window.styleMask.insert(.fullSizeContentView)
                 window.makeKeyAndOrderFront(nil)
@@ -61,88 +60,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        setupQuickAIWindow()
+        QuickAIManager.shared.setup()
 
-        HotKeyManager.shared.onTrigger = { [weak self] in
+        HotKeyManager.shared.onTrigger = {
             if UserDefaults.standard.bool(forKey: "EnableQuickAI") {
-                self?.toggleQuickAI()
+                QuickAIManager.shared.toggle()
             }
         }
         HotKeyManager.shared.register()
 
-        print("AppAI has launched! Check your Dock if you don't see the window.")
+        print("Prism has launched!")
     }
 
-    func setupQuickAIWindow() {
-        let panel = QuickAIPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 80),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.isReleasedWhenClosed = false
-        panel.isMovableByWindowBackground = true
-
-        let rootView = QuickAIView(
-            onResize: { [weak panel] size in
-                guard let panel = panel else { return }
-                DispatchQueue.main.async {
-                    let currentFrame = panel.frame
-                    if currentFrame.size != size {
-                        let newY = currentFrame.maxY - size.height
-                        let newFrame = NSRect(
-                            x: currentFrame.minX, y: newY,
-                            width: size.width,
-                            height: size.height)
-
-                        NSAnimationContext.runAnimationGroup { context in
-                            context.duration = 0.4
-                            context.timingFunction = CAMediaTimingFunction(
-                                controlPoints: 0.23, 1, 0.32, 1)  // Ease Out Quint
-                            panel.animator().setFrame(newFrame, display: true)
-                        }
-                    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool)
+        -> Bool
+    {
+        if !flag {
+            // If no windows are visible (excluding Quick AI which might be hidden), show the main window
+            for window in NSApp.windows {
+                if !(window is QuickAIPanel) {
+                    window.makeKeyAndOrderFront(nil)
+                    return true
                 }
-            },
-            onClose: { [weak panel] in
-                panel?.orderOut(nil)
-                NSApp.hide(nil)
             }
-        )
-
-        panel.contentView = NSHostingView(rootView: rootView)
-        panel.center()
-        self.quickAIWindow = panel
-    }
-
-    func toggleQuickAI() {
-        guard let panel = quickAIWindow else { return }
-
-        if panel.isVisible && panel.isKeyWindow {
-            NSApp.hide(nil)
-        } else {
-            if let screen = NSScreen.main {
-                let screenRect = screen.visibleFrame
-                let panelSize = panel.frame.size
-                let x = screenRect.midX - (panelSize.width / 2)
-                let y = screenRect.maxY - 200 - panelSize.height
-                panel.setFrameOrigin(NSPoint(x: x, y: y))
-            } else {
-                panel.center()
-            }
-
-            panel.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
         }
+        return true
     }
-}
-
-class QuickAIPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
 }
