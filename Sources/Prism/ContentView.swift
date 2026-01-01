@@ -1898,7 +1898,32 @@ struct MarkdownView: View, Equatable {
             }
         }
 
-        // 2. Handle \frac12 (single digits)
+        // 2. Handle \frac{a}b (single char denominator, not starting with {)
+        // Note: Commands like \alpha are already converted to unicode, so they count as single chars.
+        let singleDenPattern = "\\\\frac\\{([^}]+)\\}([^\\{])"
+        if let regex = try? NSRegularExpression(pattern: singleDenPattern) {
+            let nsString = newText as NSString
+            let results = regex.matches(
+                in: newText, range: NSRange(location: 0, length: nsString.length))
+
+            for result in results.reversed() {
+                if result.numberOfRanges == 3 {
+                    let num = nsString.substring(with: result.range(at: 1))
+                    let den = nsString.substring(with: result.range(at: 2))
+
+                    let numStr = shouldParenthesize(num) ? "(\(num))" : num
+                    // den is a single char, no parens needed usually, but let's be safe if it's a digit?
+                    // Actually if it's a single char like 'x', 'x' is fine.
+                    let replacement = "\(numStr)/\(den)"
+
+                    if let r = Range(result.range(at: 0), in: newText) {
+                        newText.replaceSubrange(r, with: replacement)
+                    }
+                }
+            }
+        }
+
+        // 3. Handle \frac12 (single digits)
         let digitPattern = "\\\\frac(\\d)(\\d)"
         if let regex = try? NSRegularExpression(pattern: digitPattern) {
             let nsString = newText as NSString
@@ -2039,26 +2064,32 @@ struct MarkdownView: View, Equatable {
             "\\Leftarrow": "⇐", "\\leftrightarrow": "↔", "\\Leftrightarrow": "⇔",
             "\\dag": "†", "\\ddag": "‡", "\\dots": "...", "\\ldots": "...",
             "\\{": "{", "\\}": "}", "\\%": "%", "\\$": "$", "\\&": "&", "\\_": "_",
+            "\\i": "ı",
         ]
 
         for (key, value) in replacements {
             content = content.replacingOccurrences(of: key, with: value)
         }
 
-        // 2. Handle \sqrt{...} -> √(...)
+        // 2. Handle Text Commands (Run early to avoid interfering with other commands)
+        content = replaceTextCommand(content)
+
+        // 3. Handle \boxed{...} -> [...]
+        content = replaceCommand(content, command: "\\\\boxed", replacement: { "[\($0)]" })
+        // Also handle /boxed just in case (user typo)
+        content = replaceCommand(content, command: "/boxed", replacement: { "[\($0)]" })
+
+        // 4. Handle \sqrt{...} -> √(...)
         content = replaceCommand(content, command: "\\\\sqrt", replacement: { "√(\($0))" })
 
-        // 3. Handle \frac{a}{b} -> (a)/(b)
+        // 5. Handle \frac{a}{b} -> (a)/(b)
         content = replaceFrac(content)
 
-        // 4. Handle Superscripts/Subscripts
+        // 6. Handle Superscripts/Subscripts
         content = replaceSuperscripts(content)
         content = replaceSubscripts(content)
 
-        // 5. Handle Text Commands
-        content = replaceTextCommand(content)
-
-        // 6. Cleanup remaining commands
+        // 7. Cleanup remaining commands
         content = content.replacingOccurrences(of: "\\", with: "")
         content = content.replacingOccurrences(of: "{", with: "")
         content = content.replacingOccurrences(of: "}", with: "")
