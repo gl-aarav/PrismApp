@@ -2355,7 +2355,9 @@ struct SettingsView: View {
         Form {
             Section(header: Text("General")) {
                 Toggle("Show Menu Bar Icon", isOn: $showMenuBar)
+                    .toggleStyle(.switch)
                 Toggle("Enable Quick AI Hotkey", isOn: $enableQuickAI)
+                    .toggleStyle(.switch)
 
                 HStack {
                     Text("Background Image")

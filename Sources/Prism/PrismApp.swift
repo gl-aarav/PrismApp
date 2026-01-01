@@ -72,15 +72,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("Prism has launched!")
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // If Quick AI is open, we don't want to force the main window to open
+        if let panel = QuickAIManager.shared.panel, panel.isVisible {
+            return
+        }
+
+        // If no windows are visible (excluding Quick AI), show the main window
+        // This handles Cmd+Tab or other activation methods where applicationShouldHandleReopen might not be called
+        let visibleWindows = NSApp.windows.filter { $0.isVisible && !($0 is QuickAIPanel) }
+        if visibleWindows.isEmpty {
+            for window in NSApp.windows {
+                if !(window is QuickAIPanel) {
+                    window.makeKeyAndOrderFront(nil)
+                    return
+                }
+            }
+        }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool)
         -> Bool
     {
+        // If Quick AI is open, we don't want to force the main window to open
+        if let panel = QuickAIManager.shared.panel, panel.isVisible {
+            return true
+        }
+
         if !flag {
             // If no windows are visible (excluding Quick AI which might be hidden), show the main window
             for window in NSApp.windows {
                 if !(window is QuickAIPanel) {
                     window.makeKeyAndOrderFront(nil)
-                    return true
+                    return false
                 }
             }
         }
