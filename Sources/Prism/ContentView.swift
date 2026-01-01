@@ -2632,7 +2632,7 @@ struct QuickChatView: View {
 
             // Messages
             ScrollViewReader { proxy in
-                ScrollView([.vertical, .horizontal]) {
+                ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(chatManager.getCurrentMessages()) { message in
                             MessageView(message: message, maxBubbleWidth: 300)
@@ -2648,7 +2648,7 @@ struct QuickChatView: View {
                         }
                     }
                     .padding()
-                    .frame(minWidth: 350, alignment: .leading)
+                    .padding(.bottom, 20)
                 }
                 .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
                     if let lastId = chatManager.getCurrentMessages().last?.id {
