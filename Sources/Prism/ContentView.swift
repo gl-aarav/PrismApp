@@ -1960,46 +1960,182 @@ struct MarkdownView: View, Equatable {
     }
 
     private func mathText(_ latex: String, display: Bool) -> AttributedString {
-        let cleanLatex = cleanLatex(latex)
-
-        // Check validity
-        if !isLatexValid(cleanLatex) {
-            let delimiter = display ? "$$" : "$"
-            return AttributedString("\(delimiter)\(latex)\(delimiter)")
+        if !display {
+            // Inline math: Convert to text
+            let text = convertLatexToText(latex)
+            return AttributedString(text)
         }
 
-        let fontSize: CGFloat = display ? 22 : 15
-        let labelMode: MTMathUILabelMode = display ? .display : .text
+        // Display math: Use SwiftMath
+        let cleanLatex = cleanLatex(latex)
+        let fontSize: CGFloat = 22
+
+        // 1. Measure using MTMathUILabel to get the descent
+        let label = MTMathUILabel()
+        label.labelMode = .display
+        label.fontSize = fontSize
+        label.textColor = NSColor.textColor
+        label.latex = cleanLatex
+        label.layout()
+
+        // 2. Render using MTMathImage
         let mathImage = MTMathImage(
-            latex: cleanLatex, fontSize: fontSize, textColor: .labelColor, labelMode: labelMode)
+            latex: cleanLatex, fontSize: fontSize, textColor: .textColor,
+            labelMode: .display)
 
         let (_, image) = mathImage.asImage()
+
         if let img = image {
             if img.size.width > 0 && img.size.height > 0 {
                 let attachment = NSTextAttachment()
                 attachment.image = img
+
+                // Calculate baseline offset
+                var yOffset: CGFloat = 0
+                if let displayList = label.displayList {
+                    yOffset = -displayList.descent
+                } else {
+                    yOffset = -img.size.height / 2 + (fontSize * 0.25)
+                }
+
                 attachment.bounds = CGRect(
-                    x: 0, y: display ? -2.0 : -3.5, width: img.size.width, height: img.size.height)
+                    x: 0, y: yOffset, width: img.size.width, height: img.size.height)
 
                 let nsAttrStr = NSMutableAttributedString(attachment: attachment)
 
-                if display {
-                    let paragraphStyle = NSMutableParagraphStyle()
-                    paragraphStyle.alignment = .center
-                    nsAttrStr.addAttribute(
-                        .paragraphStyle, value: paragraphStyle,
-                        range: NSRange(location: 0, length: nsAttrStr.length))
+                let paragraphStyle = NSMutableParagraphStyle()
+                paragraphStyle.alignment = .center
+                nsAttrStr.addAttribute(
+                    .paragraphStyle, value: paragraphStyle,
+                    range: NSRange(location: 0, length: nsAttrStr.length))
 
-                    let attrStr = AttributedString(nsAttrStr)
-                    return AttributedString("\n") + attrStr + AttributedString("\n")
-                }
-
-                return AttributedString(nsAttrStr)
+                let attrStr = AttributedString(nsAttrStr)
+                return AttributedString("\n") + attrStr + AttributedString("\n")
             }
         }
 
-        let delimiter = display ? "$$" : "$"
+        let delimiter = "$$"
         return AttributedString("\(delimiter)\(latex)\(delimiter)")
+    }
+
+    private func convertLatexToText(_ latex: String) -> String {
+        var content = latex
+
+        // 1. Basic Replacements
+        let replacements: [String: String] = [
+            "\\alpha": "α", "\\beta": "β", "\\gamma": "γ", "\\delta": "δ", "\\epsilon": "ε",
+            "\\zeta": "ζ", "\\eta": "η", "\\theta": "θ", "\\iota": "ι", "\\kappa": "κ",
+            "\\lambda": "λ", "\\mu": "μ", "\\nu": "ν", "\\xi": "ξ", "\\omicron": "ο",
+            "\\pi": "π", "\\rho": "ρ", "\\sigma": "σ", "\\tau": "τ", "\\upsilon": "υ",
+            "\\phi": "φ", "\\chi": "χ", "\\psi": "ψ", "\\omega": "ω",
+            "\\Gamma": "Γ", "\\Delta": "Δ", "\\Theta": "Θ", "\\Lambda": "Λ", "\\Xi": "Ξ",
+            "\\Pi": "Π", "\\Sigma": "Σ", "\\Upsilon": "Υ", "\\Phi": "Φ", "\\Psi": "Ψ",
+            "\\Omega": "Ω",
+            "\\times": "×", "\\cdot": "·", "\\div": "÷", "\\pm": "±", "\\mp": "∓",
+            "\\leq": "≤", "\\geq": "≥", "\\neq": "≠", "\\approx": "≈", "\\equiv": "≡",
+            "\\forall": "∀", "\\exists": "∃", "\\in": "∈", "\\notin": "∉", "\\subset": "⊂",
+            "\\subseteq": "⊆", "\\cup": "∪", "\\cap": "∩", "\\infty": "∞", "\\partial": "∂",
+            "\\nabla": "∇", "\\rightarrow": "→", "\\leftarrow": "←", "\\Rightarrow": "⇒",
+            "\\Leftarrow": "⇐", "\\leftrightarrow": "↔", "\\Leftrightarrow": "⇔",
+            "\\dag": "†", "\\ddag": "‡", "\\dots": "...", "\\ldots": "...",
+            "\\{": "{", "\\}": "}", "\\%": "%", "\\$": "$", "\\&": "&", "\\_": "_",
+        ]
+
+        for (key, value) in replacements {
+            content = content.replacingOccurrences(of: key, with: value)
+        }
+
+        // 2. Handle \sqrt{...} -> √(...)
+        content = replaceCommand(content, command: "\\\\sqrt", replacement: { "√(\($0))" })
+
+        // 3. Handle \frac{a}{b} -> (a)/(b)
+        content = replaceFrac(content)
+
+        // 4. Handle Superscripts/Subscripts
+        content = replaceSuperscripts(content)
+        content = replaceSubscripts(content)
+
+        // 5. Handle Text Commands
+        content = replaceTextCommand(content)
+
+        // 6. Cleanup remaining commands
+        content = content.replacingOccurrences(of: "\\", with: "")
+        content = content.replacingOccurrences(of: "{", with: "")
+        content = content.replacingOccurrences(of: "}", with: "")
+
+        return content
+    }
+
+    private func replaceCommand(_ text: String, command: String, replacement: (String) -> String)
+        -> String
+    {
+        var newText = text
+        let pattern = "\(command)\\{([^}]+)\\}"
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            let nsString = newText as NSString
+            let results = regex.matches(
+                in: newText, range: NSRange(location: 0, length: nsString.length))
+            for result in results.reversed() {
+                if result.numberOfRanges == 2 {
+                    let content = nsString.substring(with: result.range(at: 1))
+                    let replaced = replacement(content)
+                    if let r = Range(result.range(at: 0), in: newText) {
+                        newText.replaceSubrange(r, with: replaced)
+                    }
+                }
+            }
+        }
+        return newText
+    }
+
+    private func replaceSubscripts(_ text: String) -> String {
+        var newText = text
+        let map: [Character: String] = [
+            "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+            "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+            "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+            "a": "ₐ", "e": "ₑ", "o": "ₒ", "x": "ₓ", "h": "ₕ", "k": "ₖ", "l": "ₗ", "m": "ₘ",
+            "n": "ₙ", "p": "ₚ", "s": "ₛ", "t": "ₜ",
+        ]
+
+        func convertToSub(_ str: String) -> String {
+            return str.map { map[$0] ?? String($0) }.joined()
+        }
+
+        // _{...}
+        let bracePattern = "_\\{([^}]+)\\}"
+        if let regex = try? NSRegularExpression(pattern: bracePattern) {
+            let nsString = newText as NSString
+            let results = regex.matches(
+                in: newText, range: NSRange(location: 0, length: nsString.length))
+            for result in results.reversed() {
+                if result.numberOfRanges == 2 {
+                    let content = nsString.substring(with: result.range(at: 1))
+                    let subStr = convertToSub(content)
+                    if let r = Range(result.range(at: 0), in: newText) {
+                        newText.replaceSubrange(r, with: subStr)
+                    }
+                }
+            }
+        }
+
+        // _x
+        let charPattern = "_([0-9aeoxhklmnpst+\\-=()])"
+        if let regex = try? NSRegularExpression(pattern: charPattern) {
+            let nsString = newText as NSString
+            let results = regex.matches(
+                in: newText, range: NSRange(location: 0, length: nsString.length))
+            for result in results.reversed() {
+                if result.numberOfRanges == 2 {
+                    let content = nsString.substring(with: result.range(at: 1))
+                    let subStr = convertToSub(content)
+                    if let r = Range(result.range(at: 0), in: newText) {
+                        newText.replaceSubrange(r, with: subStr)
+                    }
+                }
+            }
+        }
+        return newText
     }
 
     var body: some View {
