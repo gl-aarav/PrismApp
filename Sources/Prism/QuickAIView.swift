@@ -124,8 +124,8 @@ struct QuickAIView: View {
             .background(.ultraThinMaterial)
         }
         .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
-        .cornerRadius(16)
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 1))
+        .cornerRadius(26)
+        .overlay(RoundedRectangle(cornerRadius: 26).stroke(Color.white.opacity(0.1), lineWidth: 1))
         .onAppear {
             isFocused = true
             onResize?(CGSize(width: 700, height: 80))

@@ -116,7 +116,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if panel.isVisible {
             panel.orderOut(nil)
-            NSApp.hide(nil)
+            let hasVisibleWindows = NSApp.windows.contains { $0 != panel && $0.isVisible }
+            if !hasVisibleWindows {
+                NSApp.hide(nil)
+            }
         } else {
             panel.center()
             panel.makeKeyAndOrderFront(nil)
