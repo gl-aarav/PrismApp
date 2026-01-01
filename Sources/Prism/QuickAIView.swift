@@ -23,131 +23,132 @@ struct QuickAIView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header / Drag Area
-            HStack {
-                Image(systemName: "sparkles")
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.blue, .purple], startPoint: .topLeading,
-                            endPoint: .bottomTrailing))
-                Text("Quick AI")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.secondary)
+            // Content Area
+            ZStack {
+                if chatManager.getCurrentMessages().isEmpty {
+                    // Empty State / Greeting
+                    VStack(alignment: .leading, spacing: 8) {
+                        Spacer()
+                        Text("Hello! How can I assist you today?")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundColor(.primary)
 
-                Spacer()
-
-                Picker("", selection: $selectedProvider) {
-                    Text("Gemini").tag("Gemini API")
-                    Text("Ollama").tag("Ollama")
-                    Text("Private").tag("Private Cloud")
-                    Text("Device").tag("On-Device")
-                    Text("ChatGPT").tag("ChatGPT")
-                }
-                .labelsHidden()
-                .frame(width: 100)
-                .controlSize(.small)
-
-                Button(action: {
-                    chatManager.deleteAllSessions()
-                }) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Clear Chat")
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(.ultraThinMaterial)
-
-            Divider()
-
-            // Messages Area
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        if chatManager.getCurrentMessages().isEmpty {
-                            VStack(spacing: 12) {
-                                Spacer()
-                                Image(systemName: "command")
-                                    .font(.system(size: 40))
-                                    .foregroundStyle(.tertiary)
-                                Text("How can I help you today?")
-                                    .font(.title3)
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
+                        HStack(spacing: 6) {
+                            // Provider Selector
+                            Menu {
+                                Picker("Provider", selection: $selectedProvider) {
+                                    Text("Gemini").tag("Gemini API")
+                                    Text("Ollama").tag("Ollama")
+                                    Text("Private Cloud").tag("Private Cloud")
+                                    Text("On-Device").tag("On-Device")
+                                    Text("ChatGPT").tag("ChatGPT")
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: getProviderIcon(selectedProvider))
+                                    Text(selectedProvider)
+                                }
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.blue)
                             }
-                            .frame(maxWidth: .infinity, minHeight: 200)
-                        } else {
-                            ForEach(chatManager.getCurrentMessages()) { message in
-                                QuickAIMessageView(message: message)
-                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+
+                            Text("• Check important info for mistakes.")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
                         }
-
-                        if isLoading {
-                            HStack {
-                                TypingIndicator()
-                                Spacer()
-                            }
-                            .padding(.horizontal)
-                            .id("loading")
-                        }
+                        Spacer()
                     }
-                    .padding(16)
-                }
-                .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
-                    if let lastId = chatManager.getCurrentMessages().last?.id {
-                        withAnimation {
-                            proxy.scrollTo(lastId, anchor: .bottom)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
+                } else {
+                    // Chat History
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 16) {
+                                ForEach(chatManager.getCurrentMessages()) { message in
+                                    QuickAIMessageView(message: message)
+                                }
+                                if isLoading {
+                                    HStack {
+                                        TypingIndicator()
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal)
+                                    .id("loading")
+                                }
+                            }
+                            .padding(20)
                         }
-                    }
-                }
-                .onChange(of: isLoading) { _, loading in
-                    if loading {
-                        withAnimation {
-                            proxy.scrollTo("loading", anchor: .bottom)
+                        .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
+                            if let lastId = chatManager.getCurrentMessages().last?.id {
+                                withAnimation {
+                                    proxy.scrollTo(lastId, anchor: .bottom)
+                                }
+                            }
+                        }
+                        .onChange(of: isLoading) { _, loading in
+                            if loading {
+                                withAnimation {
+                                    proxy.scrollTo("loading", anchor: .bottom)
+                                }
+                            }
                         }
                     }
                 }
             }
-
-            Divider()
 
             // Input Area
-            HStack(alignment: .bottom, spacing: 12) {
-                TextField("Ask anything...", text: $inputText, axis: .vertical)
+            HStack(spacing: 12) {
+                // Icon
+                Image(systemName: "atom")  // Placeholder for Prism logo
+                    .font(.system(size: 20))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.red, .orange, .pink], startPoint: .topLeading,
+                            endPoint: .bottomTrailing))
+
+                TextField("Request...", text: $inputText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .lineLimit(1...8)
+                    .font(.system(size: 18))
                     .focused($isFocused)
-                    .onSubmit {
-                        sendMessage()
-                    }
-                    .onAppear {
-                        isFocused = true
-                    }
+                    .onSubmit { sendMessage() }
 
                 Button(action: sendMessage) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 24))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(
-                            inputText.isEmpty ? Color.gray.gradient : Color.blue.gradient)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Color.blue)
+                        .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(inputText.isEmpty || isLoading)
             }
-            .padding(16)
-            .background(.ultraThinMaterial)
+            .padding(12)
+            .background(Color.gray.opacity(0.1))  // Light gray background for input pill
+            .clipShape(RoundedRectangle(cornerRadius: 30))
+            .padding(16)  // Padding around the pill
         }
-        .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
-        .cornerRadius(16)
+        .background(VisualEffectView(material: .popover, blendingMode: .behindWindow))  // Lighter material
+        .clipShape(RoundedRectangle(cornerRadius: 24))
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 24)
+                .stroke(Color.white.opacity(0.2), lineWidth: 1)
         )
+        .onAppear { isFocused = true }
+    }
+
+    func getProviderIcon(_ provider: String) -> String {
+        switch provider {
+        case "On-Device": return "iphone"
+        case "Private Cloud": return "lock.icloud"
+        case "Gemini API": return "sparkles"
+        case "Ollama": return "laptopcomputer"
+        case "ChatGPT": return "message"
+        default: return "cpu"
+        }
     }
 
     func sendMessage() {
