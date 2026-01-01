@@ -7,7 +7,7 @@ struct QuickAIView: View {
     @StateObject private var chatManager = ChatManager()
     @State private var inputText: String = ""
     @State private var isLoading: Bool = false
-    @State private var selectedProvider: String = "Gemini API"
+    @State private var selectedProvider: String = "Ollama"
     @State private var isExpanded: Bool = false
     @FocusState private var isFocused: Bool
 
@@ -321,7 +321,7 @@ struct QuickAIMessageView: View {
                 Image(systemName: "sparkles")
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [.blue, .purple], startPoint: .topLeading,
+                            colors: [.blue, .green], startPoint: .topLeading,
                             endPoint: .bottomTrailing)
                     )
                     .frame(width: 24, height: 24)

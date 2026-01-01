@@ -41,7 +41,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     override init() {
         super.init()
-        UserDefaults.standard.register(defaults: ["ShowMenuBar": true])
+        UserDefaults.standard.register(defaults: ["ShowMenuBar": true, "EnableQuickAI": true])
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -64,7 +64,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupQuickAIWindow()
 
         HotKeyManager.shared.onTrigger = { [weak self] in
-            self?.toggleQuickAI()
+            if UserDefaults.standard.bool(forKey: "EnableQuickAI") {
+                self?.toggleQuickAI()
+            }
         }
         HotKeyManager.shared.register()
 
@@ -114,12 +116,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func toggleQuickAI() {
         guard let panel = quickAIWindow else { return }
 
-        if panel.isVisible {
-            panel.orderOut(nil)
-            let hasVisibleWindows = NSApp.windows.contains { $0 != panel && $0.isVisible }
-            if !hasVisibleWindows {
-                NSApp.hide(nil)
-            }
+        if panel.isVisible && panel.isKeyWindow {
+            NSApp.hide(nil)
         } else {
             panel.center()
             panel.makeKeyAndOrderFront(nil)

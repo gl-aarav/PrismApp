@@ -2323,6 +2323,7 @@ struct SettingsView: View {
     @Binding var backgroundImagePath: String
     @AppStorage("SystemPrompt") private var systemPrompt: String = ""
     @AppStorage("ShowMenuBar") private var showMenuBar = true
+    @AppStorage("EnableQuickAI") private var enableQuickAI = true
     @EnvironmentObject var chatManager: ChatManager
 
     let ollamaModels = [
@@ -2354,6 +2355,7 @@ struct SettingsView: View {
         Form {
             Section(header: Text("General")) {
                 Toggle("Show Menu Bar Icon", isOn: $showMenuBar)
+                Toggle("Enable Quick AI Hotkey", isOn: $enableQuickAI)
 
                 HStack {
                     Text("Background Image")
