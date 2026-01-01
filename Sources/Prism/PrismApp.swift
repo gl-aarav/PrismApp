@@ -72,24 +72,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func setupQuickAIWindow() {
-        let panel = NSPanel(
+        let panel = QuickAIPanel(
             contentRect: NSRect(x: 0, y: 0, width: 700, height: 80),
-            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
-        panel.isMovableByWindowBackground = true
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
-        panel.standardWindowButton(.closeButton)?.isHidden = true
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.isMovableByWindowBackground = true
 
         let rootView = QuickAIView(
             onResize: { [weak panel] size in
@@ -128,4 +123,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
         }
     }
+}
+
+class QuickAIPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }
