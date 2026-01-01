@@ -384,8 +384,10 @@ struct Message: Identifiable, Codable, Equatable {
 // MARK: - Services
 
 class ChatManager: ObservableObject {
+    static let shared = ChatManager()
     @Published var sessions: [ChatSession] = []
     @Published var currentSessionId: UUID?
+    @Published var currentTask: Task<Void, Never>?
 
     private let savePath: URL
 
@@ -872,7 +874,7 @@ struct WebView: NSViewRepresentable {
 }
 
 struct ContentView: View {
-    @StateObject private var chatManager = ChatManager()
+    @ObservedObject private var chatManager = ChatManager.shared
     @State private var inputText: String = ""
     @State private var selectedImage: NSImage? = nil
     @State private var isLoading: Bool = false
@@ -1738,10 +1740,10 @@ struct MarkdownView: View, Equatable {
                         + parseInlineMarkdown(suffix)
                 } else {
                     // Math (inline)
-                    let formattedContent = formatInlineMath(content)
+                    let mathAttrStr = mathText(content, display: false)
 
                     return parseInlineMarkdown(String(prefix))
-                        + AttributedString(formattedContent)
+                        + mathAttrStr
                         + parseInlineMarkdown(suffix)
                 }
             }
@@ -1931,6 +1933,10 @@ struct MarkdownView: View, Equatable {
         // Fix common typos
         content = content.replacingOccurrences(of: "\\tfrac", with: "\\frac")
         content = content.replacingOccurrences(of: "\\trac", with: "\\frac")
+
+        // Fix legacy symbols
+        content = content.replacingOccurrences(of: "\\dag", with: "\\dagger")
+        content = content.replacingOccurrences(of: "\\ddag", with: "\\ddagger")
 
         // Remove sizing commands
         let sizingCommands = ["\\big", "\\Big", "\\bigg", "\\Bigg"]
@@ -2191,6 +2197,7 @@ struct EmptyStateView: View {
 struct MessageView: View, Equatable {
     let message: Message
     var onRegenerate: (() -> Void)?
+    var maxBubbleWidth: CGFloat = 500
 
     @State private var isCopied = false
     @State private var showImagePreview = false
@@ -2216,7 +2223,7 @@ struct MessageView: View, Equatable {
                         .background(.ultraThinMaterial)
                         .cornerRadius(16)
                 }
-                .frame(maxWidth: 500, alignment: .trailing)
+                .frame(maxWidth: maxBubbleWidth, alignment: .trailing)
             } else {
                 Image(systemName: "sparkles")
                     .foregroundStyle(
@@ -2573,7 +2580,7 @@ struct SplashScreen: View {
 }
 
 struct QuickChatView: View {
-    @StateObject private var chatManager = ChatManager()  // Independent session for quick chat
+    @ObservedObject var chatManager = ChatManager.shared
     @State private var inputText: String = ""
     @State private var isLoading: Bool = false
     @State private var selectedProvider: String = "Gemini API"
@@ -2628,7 +2635,7 @@ struct QuickChatView: View {
                 ScrollView([.vertical, .horizontal]) {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(chatManager.getCurrentMessages()) { message in
-                            MessageView(message: message)
+                            MessageView(message: message, maxBubbleWidth: 300)
                         }
                         if isLoading {
                             HStack {
@@ -2681,7 +2688,7 @@ struct QuickChatView: View {
         chatManager.addMessage(userMsg)
         isLoading = true
 
-        Task {
+        chatManager.currentTask = Task {
             if selectedProvider == "Gemini API" {
                 if !geminiKey.isEmpty {
                     let aiMsgId = UUID()

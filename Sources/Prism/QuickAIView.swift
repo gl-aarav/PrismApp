@@ -4,7 +4,7 @@ struct QuickAIView: View {
     var onResize: ((CGSize) -> Void)?
     var onClose: (() -> Void)?
 
-    @StateObject private var chatManager = ChatManager()
+    @ObservedObject var chatManager = ChatManager.shared
     @State private var inputText: String = ""
     @State private var isLoading: Bool = false
     @State private var selectedProvider: String = "Ollama"
@@ -181,7 +181,7 @@ struct QuickAIView: View {
         chatManager.addMessage(userMsg)
         isLoading = true
 
-        Task {
+        chatManager.currentTask = Task {
             if selectedProvider == "Gemini API" {
                 if !geminiKey.isEmpty {
                     let aiMsgId = UUID()
