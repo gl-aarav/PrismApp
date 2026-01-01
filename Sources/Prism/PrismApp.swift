@@ -20,7 +20,7 @@ struct PrismApp: App {
                                 string: "Developed by Aarav Goyal",
                                 attributes: [
                                     .font: NSFont.systemFont(ofSize: 11),
-                                    .foregroundColor: NSColor.labelColor
+                                    .foregroundColor: NSColor.labelColor,
                                 ]
                             )
                         ]
@@ -28,7 +28,7 @@ struct PrismApp: App {
                 }
             }
         }
-        
+
         MenuBarExtra("Prism", systemImage: "triangle", isInserted: $showMenuBar) {
             QuickChatView()
         }
@@ -37,19 +37,20 @@ struct PrismApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    
+    var quickAIWindow: NSPanel?
+
     override init() {
         super.init()
         UserDefaults.standard.register(defaults: ["ShowMenuBar": true])
     }
-    
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Ensure the app is a regular app (shows in Dock, has UI)
         NSApp.setActivationPolicy(.regular)
-        
+
         // Bring to front
         NSApp.activate(ignoringOtherApps: true)
-        
+
         // Force window to appear if needed
         DispatchQueue.main.async {
             if let window = NSApp.windows.first {
@@ -59,7 +60,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 window.center()
             }
         }
-        
+
+        setupQuickAIWindow()
+
+        HotKeyManager.shared.onTrigger = { [weak self] in
+            self?.toggleQuickAI()
+        }
+        HotKeyManager.shared.register()
+
         print("AppAI has launched! Check your Dock if you don't see the window.")
+    }
+
+    func setupQuickAIWindow() {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
+            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isMovableByWindowBackground = true
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isReleasedWhenClosed = false
+
+        panel.contentView = NSHostingView(rootView: QuickAIView())
+        panel.center()
+        self.quickAIWindow = panel
+    }
+
+    func toggleQuickAI() {
+        guard let panel = quickAIWindow else { return }
+
+        if panel.isVisible {
+            panel.orderOut(nil)
+        } else {
+            panel.center()
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }
