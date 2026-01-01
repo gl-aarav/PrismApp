@@ -4,9 +4,9 @@ import SwiftUI
 class QuickAIManager: ObservableObject {
     static let shared = QuickAIManager()
     var panel: QuickAIPanel?
-    
+
     private init() {}
-    
+
     func setup() {
         let panel = QuickAIPanel(
             contentRect: NSRect(x: 0, y: 0, width: 700, height: 80),
@@ -21,7 +21,7 @@ class QuickAIManager: ObservableObject {
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
         panel.isMovableByWindowBackground = true
-        
+
         let rootView = QuickAIView(
             onResize: { [weak panel] size in
                 guard let panel = panel else { return }
@@ -33,10 +33,11 @@ class QuickAIManager: ObservableObject {
                             x: currentFrame.minX, y: newY,
                             width: size.width,
                             height: size.height)
-                        
+
                         NSAnimationContext.runAnimationGroup { context in
                             context.duration = 0.4
-                            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1) // Ease Out Quint
+                            context.timingFunction = CAMediaTimingFunction(
+                                controlPoints: 0.23, 1, 0.32, 1)  // Ease Out Quint
                             panel.animator().setFrame(newFrame, display: true)
                         }
                     }
@@ -44,21 +45,41 @@ class QuickAIManager: ObservableObject {
             },
             onClose: { [weak panel] in
                 panel?.orderOut(nil)
-                NSApp.hide(nil)
+
+                // If no other windows are visible, hide the app to return focus to previous app
+                let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
+                if !otherWindowsVisible {
+                    NSApp.hide(nil)
+                }
             }
         )
-        
+
         panel.contentView = NSHostingView(rootView: rootView)
         self.panel = panel
     }
-    
+
     func toggle() {
         guard let panel = panel else { return }
-        
+
         if panel.isVisible && panel.isKeyWindow {
             panel.orderOut(nil)
-            NSApp.hide(nil)
+
+            // If no other windows are visible, hide the app to return focus to previous app
+            let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
+            if !otherWindowsVisible {
+                NSApp.hide(nil)
+            }
         } else {
+            // If app is not active, we are coming from outside.
+            // We should ensure the main window doesn't pop up and distract.
+            if !NSApp.isActive {
+                for window in NSApp.windows {
+                    if window != panel {
+                        window.orderOut(nil)
+                    }
+                }
+            }
+
             if let screen = NSScreen.main {
                 let screenRect = screen.visibleFrame
                 let panelSize = panel.frame.size
@@ -68,7 +89,7 @@ class QuickAIManager: ObservableObject {
             } else {
                 panel.center()
             }
-            
+
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
