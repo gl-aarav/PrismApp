@@ -65,7 +65,9 @@ struct QuickAIView: View {
                     // New Chat
                     Button(action: {
                         chatManager.deleteAllSessions()
-                        isExpanded = false
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                            isExpanded = false
+                        }
                     }) {
                         Image(systemName: "square.and.pencil")
                             .foregroundColor(.secondary)
@@ -167,7 +169,9 @@ struct QuickAIView: View {
         guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         if !isExpanded {
-            isExpanded = true
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                isExpanded = true
+            }
         }
 
         let content = inputText

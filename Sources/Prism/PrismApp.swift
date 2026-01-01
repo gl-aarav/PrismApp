@@ -94,11 +94,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async {
                     let currentFrame = panel.frame
                     if currentFrame.size != size {
+                        let newY = currentFrame.maxY - size.height
                         let newFrame = NSRect(
-                            x: currentFrame.minX, y: currentFrame.maxY - size.height,
+                            x: currentFrame.minX, y: newY,
                             width: size.width,
                             height: size.height)
-                        panel.setFrame(newFrame, display: true, animate: panel.isVisible)
+
+                        NSAnimationContext.runAnimationGroup { context in
+                            context.duration = 0.4
+                            context.timingFunction = CAMediaTimingFunction(
+                                controlPoints: 0.23, 1, 0.32, 1)  // Ease Out Quint
+                            panel.animator().setFrame(newFrame, display: true)
+                        }
                     }
                 }
             },
@@ -119,7 +126,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if panel.isVisible && panel.isKeyWindow {
             NSApp.hide(nil)
         } else {
-            panel.center()
+            if let screen = NSScreen.main {
+                let screenRect = screen.visibleFrame
+                let panelSize = panel.frame.size
+                let x = screenRect.midX - (panelSize.width / 2)
+                let y = screenRect.maxY - 200 - panelSize.height
+                panel.setFrameOrigin(NSPoint(x: x, y: y))
+            } else {
+                panel.center()
+            }
+
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
