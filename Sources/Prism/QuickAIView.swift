@@ -1,10 +1,14 @@
 import SwiftUI
 
 struct QuickAIView: View {
+    var onResize: ((CGSize) -> Void)?
+    var onClose: (() -> Void)?
+
     @StateObject private var chatManager = ChatManager(fileName: "quick_ai_history.json")
     @State private var inputText: String = ""
     @State private var isLoading: Bool = false
     @State private var selectedProvider: String = "Gemini API"
+    @State private var isExpanded: Bool = false
     @FocusState private var isFocused: Bool
 
     // Settings
@@ -23,121 +27,124 @@ struct QuickAIView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Content Area
-            ZStack {
-                if chatManager.getCurrentMessages().isEmpty {
-                    // Empty State / Greeting
-                    VStack(alignment: .leading, spacing: 8) {
-                        Spacer()
-                        Text("Hello! How can I assist you today?")
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundColor(.primary)
+            if isExpanded {
+                // Header
+                HStack {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.blue, .green], startPoint: .topLeading,
+                                endPoint: .bottomTrailing))
+                    Text("Quick AI")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
 
-                        HStack(spacing: 6) {
-                            // Provider Selector
-                            Menu {
-                                Picker("Provider", selection: $selectedProvider) {
-                                    Text("Gemini").tag("Gemini API")
-                                    Text("Ollama").tag("Ollama")
-                                    Text("Private Cloud").tag("Private Cloud")
-                                    Text("On-Device").tag("On-Device")
-                                    Text("ChatGPT").tag("ChatGPT")
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: getProviderIcon(selectedProvider))
-                                    Text(selectedProvider)
-                                }
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.blue)
-                            }
-                            .menuStyle(.borderlessButton)
-                            .fixedSize()
+                    Spacer()
 
-                            Text("• Check important info for mistakes.")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
+                    // New Chat
+                    Button(action: {
+                        chatManager.deleteAllSessions()
+                        isExpanded = false
+                    }) {
+                        Image(systemName: "square.and.pencil")
+                            .foregroundColor(.secondary)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 24)
-                } else {
-                    // Chat History
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 16) {
-                                ForEach(chatManager.getCurrentMessages()) { message in
-                                    QuickAIMessageView(message: message)
-                                }
-                                if isLoading {
-                                    HStack {
-                                        TypingIndicator()
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal)
-                                    .id("loading")
-                                }
+                    .buttonStyle(.plain)
+                    .help("New Chat")
+
+                    // Open in Main App
+                    Button(action: openInMainApp) {
+                        Image(systemName: "arrow.up.right.square")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open in Main App")
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+
+                // Messages
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 16) {
+                            ForEach(chatManager.getCurrentMessages()) { message in
+                                QuickAIMessageView(message: message)
                             }
-                            .padding(20)
-                        }
-                        .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
-                            if let lastId = chatManager.getCurrentMessages().last?.id {
-                                withAnimation {
-                                    proxy.scrollTo(lastId, anchor: .bottom)
+                            if isLoading {
+                                HStack {
+                                    TypingIndicator()
+                                    Spacer()
                                 }
+                                .padding(.horizontal)
+                                .id("loading")
                             }
                         }
-                        .onChange(of: isLoading) { _, loading in
-                            if loading {
-                                withAnimation {
-                                    proxy.scrollTo("loading", anchor: .bottom)
-                                }
+                        .padding(20)
+                    }
+                    .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
+                        if let lastId = chatManager.getCurrentMessages().last?.id {
+                            withAnimation {
+                                proxy.scrollTo(lastId, anchor: .bottom)
+                            }
+                        }
+                    }
+                    .onChange(of: isLoading) { _, loading in
+                        if loading {
+                            withAnimation {
+                                proxy.scrollTo("loading", anchor: .bottom)
                             }
                         }
                     }
                 }
+
+                Divider()
             }
 
             // Input Area
-            HStack(spacing: 12) {
-                // Icon
-                Image(systemName: "atom")  // Placeholder for Prism logo
-                    .font(.system(size: 20))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.red, .orange, .pink], startPoint: .topLeading,
-                            endPoint: .bottomTrailing))
-
-                TextField("Request...", text: $inputText)
+            HStack(alignment: .center, spacing: 12) {
+                TextField("Request...", text: $inputText, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 18))
+                    .font(.system(size: 16))
+                    .lineLimit(1...6)
+                    .multilineTextAlignment(.leading)
                     .focused($isFocused)
                     .onSubmit { sendMessage() }
 
                 Button(action: sendMessage) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(width: 32, height: 32)
-                        .background(Color.blue)
-                        .clipShape(Circle())
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(
+                            inputText.isEmpty ? Color.gray.gradient : Color.blue.gradient)
                 }
                 .buttonStyle(.plain)
                 .disabled(inputText.isEmpty || isLoading)
             }
-            .padding(12)
-            .background(Color.gray.opacity(0.1))  // Light gray background for input pill
-            .clipShape(RoundedRectangle(cornerRadius: 30))
-            .padding(16)  // Padding around the pill
+            .padding(16)
+            .background(.ultraThinMaterial)
         }
-        .background(VisualEffectView(material: .popover, blendingMode: .behindWindow))  // Lighter material
-        .clipShape(RoundedRectangle(cornerRadius: 24))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24)
-                .stroke(Color.white.opacity(0.2), lineWidth: 1)
-        )
-        .onAppear { isFocused = true }
+        .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+        .cornerRadius(16)
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 1))
+        .onAppear {
+            isFocused = true
+            onResize?(CGSize(width: 700, height: 80))
+        }
+        .onChange(of: isExpanded) { _, expanded in
+            if expanded {
+                onResize?(CGSize(width: 700, height: 500))
+            } else {
+                onResize?(CGSize(width: 700, height: 80))
+            }
+        }
+    }
+
+    func openInMainApp() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0 != NSApp.keyWindow }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+        onClose?()
     }
 
     func getProviderIcon(_ provider: String) -> String {
@@ -153,6 +160,11 @@ struct QuickAIView: View {
 
     func sendMessage() {
         guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        if !isExpanded {
+            isExpanded = true
+        }
+
         let content = inputText
         inputText = ""
 

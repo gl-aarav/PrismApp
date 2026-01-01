@@ -73,7 +73,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func setupQuickAIWindow() {
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 80),
             styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -87,8 +87,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
 
-        panel.contentView = NSHostingView(rootView: QuickAIView())
+        let rootView = QuickAIView(
+            onResize: { [weak panel] size in
+                guard let panel = panel else { return }
+                DispatchQueue.main.async {
+                    let currentFrame = panel.frame
+                    if currentFrame.size != size {
+                        let newFrame = NSRect(
+                            x: currentFrame.minX, y: currentFrame.maxY - size.height,
+                            width: size.width,
+                            height: size.height)
+                        panel.setFrame(newFrame, display: true, animate: panel.isVisible)
+                    }
+                }
+            },
+            onClose: { [weak panel] in
+                panel?.orderOut(nil)
+                NSApp.hide(nil)
+            }
+        )
+
+        panel.contentView = NSHostingView(rootView: rootView)
         panel.center()
         self.quickAIWindow = panel
     }
@@ -98,6 +121,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if panel.isVisible {
             panel.orderOut(nil)
+            NSApp.hide(nil)
         } else {
             panel.center()
             panel.makeKeyAndOrderFront(nil)

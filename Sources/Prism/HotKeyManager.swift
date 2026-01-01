@@ -16,7 +16,9 @@ class HotKeyManager {
         InstallEventHandler(
             GetApplicationEventTarget(),
             { (_, event, _) -> OSStatus in
-                HotKeyManager.shared.onTrigger?()
+                DispatchQueue.main.async {
+                    HotKeyManager.shared.onTrigger?()
+                }
                 return noErr
             }, 1, &eventType, nil, nil)
 
