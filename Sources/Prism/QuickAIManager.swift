@@ -4,6 +4,7 @@ import SwiftUI
 class QuickAIManager: ObservableObject {
     static let shared = QuickAIManager()
     var panel: QuickAIPanel?
+    private var previousApp: NSRunningApplication?
 
     private init() {}
 
@@ -45,11 +46,17 @@ class QuickAIManager: ObservableObject {
             },
             onClose: { [weak panel] in
                 panel?.orderOut(nil)
+                NSApp.setActivationPolicy(.regular)
 
                 // If no other windows are visible, hide the app to return focus to previous app
                 let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
                 if !otherWindowsVisible {
-                    NSApp.hide(nil)
+                    if let previousApp = QuickAIManager.shared.previousApp {
+                        previousApp.activate(options: [])
+                        QuickAIManager.shared.previousApp = nil
+                    } else {
+                        NSApp.hide(nil)
+                    }
                 }
             }
         )
@@ -63,21 +70,34 @@ class QuickAIManager: ObservableObject {
 
         if panel.isVisible && panel.isKeyWindow {
             panel.orderOut(nil)
+            NSApp.setActivationPolicy(.regular)
 
             // If no other windows are visible, hide the app to return focus to previous app
             let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
             if !otherWindowsVisible {
-                NSApp.hide(nil)
+                if let previousApp = previousApp {
+                    previousApp.activate(options: [])
+                    self.previousApp = nil
+                } else {
+                    NSApp.hide(nil)
+                }
             }
         } else {
             // If app is not active, we are coming from outside.
             // We should ensure the main window doesn't pop up and distract.
             if !NSApp.isActive {
+                previousApp = NSWorkspace.shared.frontmostApplication
                 for window in NSApp.windows {
                     if window != panel {
                         window.orderOut(nil)
                     }
                 }
+            }
+
+            // Switch to accessory mode if no other windows are visible to avoid Dock/Menu bar activation
+            let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
+            if !otherWindowsVisible {
+                NSApp.setActivationPolicy(.accessory)
             }
 
             if let screen = NSScreen.main {
