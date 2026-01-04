@@ -36,9 +36,11 @@ class QuickAIManager: ObservableObject {
                             height: size.height)
 
                         NSAnimationContext.runAnimationGroup { context in
-                            context.duration = 0.4
+                            context.duration = 0.5
+                            // Liquid/Bouncy effect: Overshoots target then settles
+                            // This creates the "expands extra" and "contracts extra" behavior
                             context.timingFunction = CAMediaTimingFunction(
-                                controlPoints: 0.23, 1, 0.32, 1)  // Ease Out Quint
+                                controlPoints: 0.2, 1.25, 0.4, 1.0)
                             panel.animator().setFrame(newFrame, display: true)
                         }
                     }
