@@ -8,6 +8,7 @@ struct QuickAIView: View {
     @State private var inputText: String = ""
     @State private var isLoading: Bool = false
     @State private var selectedProvider: String = "Ollama"
+    @State private var thinkingLevel: String = "medium"
     @State private var isExpanded: Bool = false
     @FocusState private var isFocused: Bool
 
@@ -125,6 +126,26 @@ struct QuickAIView: View {
                     .focused($isFocused)
                     .onSubmit { sendMessage() }
 
+                // Thinking Level Selector
+                if selectedProvider == "Ollama" || selectedProvider == "Gemini API" {
+                    Menu {
+                        Picker("Thinking Effort", selection: $thinkingLevel) {
+                            Text("Low").tag("low")
+                            Text("Medium").tag("medium")
+                            Text("High").tag("high")
+                        }
+                    } label: {
+                        Image(systemName: "brain")
+                            .font(.system(size: 16))
+                            .foregroundColor(thinkingLevel == "medium" ? .secondary : .blue)
+                            .padding(4)
+                            .background(Color.gray.opacity(0.1))
+                            .clipShape(Circle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help("Reasoning Effort")
+                }
+
                 Button(action: sendMessage) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 28))
@@ -194,15 +215,26 @@ struct QuickAIView: View {
 
                     do {
                         var fullContent = ""
-                        for try await chunk in geminiService.sendMessageStream(
-                            history: chatManager.getCurrentMessages(), apiKey: geminiKey,
-                            model: geminiModel, systemPrompt: systemPrompt)
+                        var fullThinking = ""
+
+                        for try await (contentChunk, thinkingChunk)
+                            in geminiService.sendMessageStream(
+                                history: chatManager.getCurrentMessages(), apiKey: geminiKey,
+                                model: geminiModel, systemPrompt: systemPrompt,
+                                thinkingLevel: thinkingLevel)
                         {
-                            fullContent += chunk
+                            fullContent += contentChunk
+                            if let thinking = thinkingChunk {
+                                fullThinking += thinking
+                            }
+
                             let contentToUpdate = fullContent
+                            let thinkingToUpdate = fullThinking.isEmpty ? nil : fullThinking
+
                             DispatchQueue.main.async {
                                 self.chatManager.updateMessage(
-                                    id: aiMsgId, content: contentToUpdate)
+                                    id: aiMsgId, content: contentToUpdate,
+                                    thinkingContent: thinkingToUpdate)
                             }
                         }
                         DispatchQueue.main.async {
@@ -241,8 +273,8 @@ struct QuickAIView: View {
 
                     for try await (contentChunk, thinkingChunk) in ollamaService.sendMessageStream(
                         history: chatManager.getCurrentMessages(), endpoint: ollamaURL,
-                        model: ollamaModel, systemPrompt: systemPrompt)
-                    {
+                        model: ollamaModel, systemPrompt: systemPrompt, thinkingLevel: thinkingLevel
+                    ) {
                         fullContent += contentChunk
                         if let thinking = thinkingChunk {
                             fullThinking += thinking
@@ -333,12 +365,24 @@ struct QuickAIMessageView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     if let thinking = message.thinkingContent {
-                        Text(thinking)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .padding(8)
-                            .background(Color.gray.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        DisclosureGroup {
+                            Text(thinking)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .padding(8)
+                                .background(Color.gray.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "brain")
+                                    .font(.caption)
+                                Text("Reasoning Process")
+                                    .font(.caption)
+                            }
+                            .foregroundColor(.secondary)
+                        }
+                        .padding(.bottom, 4)
                     }
 
                     MarkdownView(blocks: message.blocks)

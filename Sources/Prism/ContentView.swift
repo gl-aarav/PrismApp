@@ -513,7 +513,8 @@ class OllamaService {
     }
 
     func sendMessageStream(
-        history: [Message], endpoint: String, model: String, systemPrompt: String = ""
+        history: [Message], endpoint: String, model: String, systemPrompt: String = "",
+        thinkingLevel: String = "medium"
     ) -> AsyncThrowingStream<(String, String?), Error> {
         return AsyncThrowingStream { continuation in
             Task {
@@ -530,10 +531,23 @@ class OllamaService {
 
                 var messages: [[String: Any]] = []
 
-                if !systemPrompt.isEmpty {
+                var finalSystemPrompt = systemPrompt
+                // Inject instructions to force thinking output if requested, mainly for models that don't do it by default
+                // or to ensure the parser can catch it.
+                if thinkingLevel == "high" || thinkingLevel == "medium" {
+                    let instruction =
+                        " Please think step-by-step before answering. Wrap your thought process in <think> and </think> tags."
+                    if finalSystemPrompt.isEmpty {
+                        finalSystemPrompt = instruction
+                    } else if !finalSystemPrompt.contains("<think>") {
+                        finalSystemPrompt += instruction
+                    }
+                }
+
+                if !finalSystemPrompt.isEmpty {
                     messages.append([
                         "role": "system",
-                        "content": systemPrompt,
+                        "content": finalSystemPrompt,
                     ])
                 }
 
@@ -555,6 +569,9 @@ class OllamaService {
                     "model": model.isEmpty ? "llama3" : model,
                     "messages": messages,
                     "stream": true,
+                    // 'reasoning_effort' is not standard for Ollama. Removed to avoid potential issues.
+                    // The system prompt instruction should handle it.
+                    "options": [:],
                 ]
 
                 do {
@@ -568,7 +585,13 @@ class OllamaService {
                         return
                     }
 
+                    var buffer = ""
                     var isThinking = false
+
+                    // Simple logic to inject reasoning prompt if needed
+                    // We do this by ensuring the system prompt provided in params includes the instruction
+                    // But we can't easily change it here since we already sent the request.
+                    // Ideally check before sending request.
 
                     for try await line in result.lines {
                         guard let data = line.data(using: .utf8),
@@ -578,43 +601,68 @@ class OllamaService {
                             let content = message["content"] as? String
                         else { continue }
 
-                        // Simple state machine for <think> tags
-                        // Note: This is a basic implementation. It assumes tags don't get split across chunks too awkwardly,
-                        // but for a robust solution we might need a buffer. For now, we'll handle the common case.
+                        buffer += content
 
-                        var processedContent = content
-                        var thinkingPart: String? = nil
-                        var contentPart: String = ""
-
-                        if content.contains("<think>") {
-                            isThinking = true
-                            processedContent = processedContent.replacingOccurrences(
-                                of: "<think>", with: "")
-                        }
-
-                        if content.contains("</think>") {
-                            isThinking = false
-                            let parts = processedContent.components(separatedBy: "</think>")
-                            if parts.count > 0 {
-                                thinkingPart = parts[0]
-                            }
-                            if parts.count > 1 {
-                                contentPart = parts[1]
-                            }
-                        } else {
-                            if isThinking {
-                                thinkingPart = processedContent
+                        while true {
+                            if !isThinking {
+                                // Search for start tag (case insensitive)
+                                if let range = buffer.range(
+                                    of: "<think>", options: .caseInsensitive)
+                                {
+                                    let preTag = buffer[..<range.lowerBound]
+                                    if !preTag.isEmpty {
+                                        continuation.yield((String(preTag), nil))
+                                    }
+                                    buffer.removeSubrange(..<range.upperBound)
+                                    isThinking = true
+                                } else {
+                                    // Handle partial tag at end
+                                    if buffer.count > 7 {
+                                        let keepIndex = buffer.index(buffer.endIndex, offsetBy: -7)
+                                        let emitStr = buffer[..<keepIndex]
+                                        continuation.yield((String(emitStr), nil))
+                                        buffer.removeSubrange(..<keepIndex)
+                                    }
+                                    break
+                                }
                             } else {
-                                contentPart = processedContent
+                                // Search for end tag (case insensitive)
+                                if let range = buffer.range(
+                                    of: "</think>", options: .caseInsensitive)
+                                {
+                                    let preTag = buffer[..<range.lowerBound]
+                                    if !preTag.isEmpty {
+                                        continuation.yield(("", String(preTag)))
+                                    }
+                                    buffer.removeSubrange(..<range.upperBound)
+                                    isThinking = false
+                                } else {
+                                    // Handle partial tag </think>
+                                    if buffer.count > 8 {
+                                        let keepIndex = buffer.index(buffer.endIndex, offsetBy: -8)
+                                        let emitStr = buffer[..<keepIndex]
+                                        continuation.yield(("", String(emitStr)))
+                                        buffer.removeSubrange(..<keepIndex)
+                                    }
+                                    break
+                                }
                             }
                         }
-
-                        continuation.yield((contentPart, thinkingPart))
 
                         if let done = json["done"] as? Bool, done {
                             break
                         }
                     }
+
+                    // Flush remaining buffer
+                    if !buffer.isEmpty {
+                        if isThinking {
+                            continuation.yield(("", buffer))
+                        } else {
+                            continuation.yield((buffer, nil))
+                        }
+                    }
+
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -635,8 +683,9 @@ class GeminiService {
     }
 
     func sendMessageStream(
-        history: [Message], apiKey: String, model: String, systemPrompt: String = ""
-    ) -> AsyncThrowingStream<String, Error> {
+        history: [Message], apiKey: String, model: String, systemPrompt: String = "",
+        thinkingLevel: String = "medium"
+    ) -> AsyncThrowingStream<(String, String?), Error> {
         return AsyncThrowingStream { continuation in
             Task {
                 let modelName = model.isEmpty ? "gemini-1.5-flash" : model
@@ -686,10 +735,22 @@ class GeminiService {
 
                 var body: [String: Any] = ["contents": contents]
 
-                if !systemPrompt.isEmpty {
+                var finalSystemPrompt = systemPrompt
+                // Inject instructions to force thinking output if requested
+                if thinkingLevel == "high" || thinkingLevel == "medium" {
+                    let instruction =
+                        " Please think step-by-step before answering. Wrap your thought process in <think> and </think> tags."
+                    if finalSystemPrompt.isEmpty {
+                        finalSystemPrompt = instruction
+                    } else if !finalSystemPrompt.contains("<think>") {
+                        finalSystemPrompt += instruction
+                    }
+                }
+
+                if !finalSystemPrompt.isEmpty {
                     body["system_instruction"] = [
                         "parts": [
-                            ["text": systemPrompt]
+                            ["text": finalSystemPrompt]
                         ]
                     ]
                 }
@@ -716,6 +777,9 @@ class GeminiService {
                         return
                     }
 
+                    var buffer = ""
+                    var isThinking = false
+
                     for try await line in result.lines {
                         if line.hasPrefix("data: ") {
                             let jsonStr = String(line.dropFirst(6))
@@ -730,9 +794,64 @@ class GeminiService {
                                 let text = parts.first?["text"] as? String
                             else { continue }
 
-                            continuation.yield(text)
+                            buffer += text
+
+                            while true {
+                                if !isThinking {
+                                    if let range = buffer.range(
+                                        of: "<think>", options: .caseInsensitive)
+                                    {
+                                        let preTag = buffer[..<range.lowerBound]
+                                        if !preTag.isEmpty {
+                                            continuation.yield((String(preTag), nil))
+                                        }
+                                        buffer.removeSubrange(..<range.upperBound)
+                                        isThinking = true
+                                    } else {
+                                        // Handle partial tag at end
+                                        if buffer.count > 7 {
+                                            let keepIndex = buffer.index(
+                                                buffer.endIndex, offsetBy: -7)
+                                            let emitStr = buffer[..<keepIndex]
+                                            continuation.yield((String(emitStr), nil))
+                                            buffer.removeSubrange(..<keepIndex)
+                                        }
+                                        break
+                                    }
+                                } else {
+                                    if let range = buffer.range(
+                                        of: "</think>", options: .caseInsensitive)
+                                    {
+                                        let preTag = buffer[..<range.lowerBound]
+                                        if !preTag.isEmpty {
+                                            continuation.yield(("", String(preTag)))
+                                        }
+                                        buffer.removeSubrange(..<range.upperBound)
+                                        isThinking = false
+                                    } else {
+                                        // Handle partial tag </think>
+                                        if buffer.count > 8 {
+                                            let keepIndex = buffer.index(
+                                                buffer.endIndex, offsetBy: -8)
+                                            let emitStr = buffer[..<keepIndex]
+                                            continuation.yield(("", String(emitStr)))
+                                            buffer.removeSubrange(..<keepIndex)
+                                        }
+                                        break
+                                    }
+                                }
+                            }
                         }
                     }
+                    // Flush remaining buffer
+                    if !buffer.isEmpty {
+                        if isThinking {
+                            continuation.yield(("", buffer))
+                        } else {
+                            continuation.yield((buffer, nil))
+                        }
+                    }
+
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -878,6 +997,7 @@ struct ContentView: View {
     @State private var inputText: String = ""
     @State private var selectedImage: NSImage? = nil
     @State private var isLoading: Bool = false
+    @State private var thinkingLevel: String = "medium"
     @State private var showSettings: Bool = false
     @State private var showSidebar: Bool = false
     @State private var lastMessageCount: Int = 0
@@ -988,11 +1108,14 @@ struct ContentView: View {
                                     InputView(
                                         inputText: $inputText,
                                         selectedImage: $selectedImage,
+                                        thinkingLevel: $thinkingLevel,
                                         isLoading: isLoading,
                                         onSend: sendMessage,
                                         onStop: stopGeneration,
                                         onSelectImage: selectImage,
-                                        isImageGen: selectedProvider == "Image Creation"
+                                        isImageGen: selectedProvider == "Image Creation",
+                                        showThinking: selectedProvider == "Ollama"
+                                            || selectedProvider == "Gemini API"
                                     )
                                 }
                                 .onChange(of: chatManager.getCurrentMessages().count) { _, count in
@@ -1176,15 +1299,25 @@ struct ContentView: View {
 
                     do {
                         var fullContent = ""
-                        for try await chunk in geminiService.sendMessageStream(
-                            history: currentHistory, apiKey: geminiKey, model: geminiModel,
-                            systemPrompt: systemPrompt)
+                        var fullThinking = ""
+
+                        for try await (contentChunk, thinkingChunk)
+                            in geminiService.sendMessageStream(
+                                history: currentHistory, apiKey: geminiKey, model: geminiModel,
+                                systemPrompt: systemPrompt, thinkingLevel: thinkingLevel)
                         {
-                            fullContent += chunk
+                            fullContent += contentChunk
+                            if let thinking = thinkingChunk {
+                                fullThinking += thinking
+                            }
+
                             let contentToUpdate = fullContent
+                            let thinkingToUpdate = fullThinking.isEmpty ? nil : fullThinking
+
                             DispatchQueue.main.async {
                                 self.chatManager.updateMessage(
-                                    id: aiMsgId, content: contentToUpdate)
+                                    id: aiMsgId, content: contentToUpdate,
+                                    thinkingContent: thinkingToUpdate)
                             }
                         }
                         DispatchQueue.main.async {
@@ -1222,7 +1355,7 @@ struct ContentView: View {
 
                     for try await (contentChunk, thinkingChunk) in ollamaService.sendMessageStream(
                         history: currentHistory, endpoint: ollamaURL, model: ollamaModel,
-                        systemPrompt: systemPrompt)
+                        systemPrompt: systemPrompt, thinkingLevel: thinkingLevel)
                     {
                         fullContent += contentChunk
                         if let thinking = thinkingChunk {
@@ -1408,11 +1541,13 @@ struct HeaderView: View {
 struct InputView: View {
     @Binding var inputText: String
     @Binding var selectedImage: NSImage?
+    @Binding var thinkingLevel: String
     var isLoading: Bool
     var onSend: () -> Void
     var onStop: () -> Void
     var onSelectImage: () -> Void
     var isImageGen: Bool
+    var showThinking: Bool
 
     @FocusState private var isFocused: Bool
 
@@ -1474,6 +1609,25 @@ struct InputView: View {
                         .onPasteCommand(of: [.image, .fileURL]) { providers in
                             handlePaste(providers)
                         }
+                }
+
+                if showThinking {
+                    Menu {
+                        Picker("Reasoning Effort", selection: $thinkingLevel) {
+                            Text("Low").tag("low")
+                            Text("Medium").tag("medium")
+                            Text("High").tag("high")
+                        }
+                    } label: {
+                        Image(systemName: "brain")
+                            .font(.system(size: 16))
+                            .foregroundColor(thinkingLevel == "medium" ? .secondary : .blue)
+                            .padding(8)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help("Reasoning Effort for Supported Models")
                 }
 
                 if isLoading {
@@ -2411,10 +2565,15 @@ struct MessageView: View, Equatable {
                                 .cornerRadius(8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } label: {
-                            Text("Thinking Process")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                            HStack(spacing: 4) {
+                                Image(systemName: "brain")
+                                    .font(.caption)
+                                Text("Reasoning Process")
+                                    .font(.caption)
+                            }
+                            .foregroundColor(.secondary)
                         }
+                        .padding(.bottom, 4)
                     }
 
                     if let image = message.image {
@@ -2868,15 +3027,25 @@ struct QuickChatView: View {
 
                     do {
                         var fullContent = ""
-                        for try await chunk in geminiService.sendMessageStream(
-                            history: chatManager.getCurrentMessages(), apiKey: geminiKey,
-                            model: geminiModel, systemPrompt: systemPrompt)
+                        var fullThinking = ""
+
+                        for try await (contentChunk, thinkingChunk)
+                            in geminiService.sendMessageStream(
+                                history: chatManager.getCurrentMessages(), apiKey: geminiKey,
+                                model: geminiModel, systemPrompt: systemPrompt)
                         {
-                            fullContent += chunk
+                            fullContent += contentChunk
+                            if let thinking = thinkingChunk {
+                                fullThinking += thinking
+                            }
+
                             let contentToUpdate = fullContent
+                            let thinkingToUpdate = fullThinking.isEmpty ? nil : fullThinking
+
                             DispatchQueue.main.async {
                                 self.chatManager.updateMessage(
-                                    id: aiMsgId, content: contentToUpdate)
+                                    id: aiMsgId, content: contentToUpdate,
+                                    thinkingContent: thinkingToUpdate)
                             }
                         }
                         DispatchQueue.main.async {
