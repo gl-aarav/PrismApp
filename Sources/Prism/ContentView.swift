@@ -1856,6 +1856,126 @@ struct MathView: NSViewRepresentable {
     }
 }
 
+struct KaTeXView: NSViewRepresentable {
+    var latex: String
+    var fontSize: CGFloat
+    @Binding var height: CGFloat
+    @Binding var didRender: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        let prefs = WKWebpagePreferences()
+        prefs.allowsContentJavaScript = true
+        config.defaultWebpagePreferences = prefs
+        config.preferences.javaScriptCanOpenWindowsAutomatically = false
+        config.userContentController.add(context.coordinator, name: "height")
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.setValue(false, forKey: "drawsBackground")
+        return webView
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        // Escape for JS template literal: keep backslashes intact, only escape backticks and interpolation
+        let escapedLatex =
+            latex
+            .replacingOccurrences(of: "`", with: "\\`")
+            .replacingOccurrences(of: "${", with: "\\${")
+            .replacingOccurrences(of: "\n", with: " ")
+
+        let html = """
+            <!doctype html>
+            <html>
+                <head>
+                    <meta charset=\"utf-8\">
+                    <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css\">
+                    <script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js\"></script>
+                    <script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js\"></script>
+                    <style>
+                        :root { color-scheme: light dark; }
+                        body { margin:0; padding:8px; background: transparent; color: #111; font-size: \(fontSize)pt; }
+                        @media (prefers-color-scheme: dark) { body { color: #f5f5f5; } }
+                        .katex, .katex * { color: inherit !important; }
+                        .katex-display { margin: 0; }
+                    </style>
+                </head>
+                <body>
+                    <div id=\"math\"></div>
+                    <script>
+                        function sendHeight() {
+                            const h = document.documentElement.scrollHeight || document.body.scrollHeight || 0;
+                            window.webkit.messageHandlers.height.postMessage(h);
+                        }
+                        document.addEventListener('DOMContentLoaded', () => {
+                            try {
+                                katex.render(String.raw`\(escapedLatex)`, document.getElementById('math'), { displayMode: true, throwOnError: false });
+                            } catch (e) {
+                                document.getElementById('math').innerText = e.toString();
+                            }
+                            setTimeout(sendHeight, 30);
+                        });
+                    </script>
+                </body>
+            </html>
+            """
+
+        nsView.loadHTMLString(html, baseURL: nil)
+    }
+
+    class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        var parent: KaTeXView
+
+        init(parent: KaTeXView) {
+            self.parent = parent
+        }
+
+        func userContentController(
+            _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
+        ) {
+            guard message.name == "height" else { return }
+            if let h = message.body as? Double {
+                DispatchQueue.main.async {
+                    self.parent.height = max(40, CGFloat(h))
+                    self.parent.didRender = true
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            webView.evaluateJavaScript(
+                "(function(){ const h = document.documentElement.scrollHeight || document.body.scrollHeight || 0; window.webkit.messageHandlers.height.postMessage(h); })();"
+            ) { _, _ in }
+        }
+    }
+}
+
+struct MathBlockView: View {
+    let equation: String
+    @State private var height: CGFloat = 60
+    @State private var didRender = false
+
+    var body: some View {
+        VStack {
+            KaTeXView(latex: equation, fontSize: 20, height: $height, didRender: $didRender)
+                .frame(height: height)
+                .frame(maxWidth: .infinity)
+                .opacity(didRender ? 1 : 0)
+
+            if !didRender {
+                MathView(equation: equation, fontSize: 18)
+                    .frame(minHeight: 30)
+                    .padding(.vertical, 4)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 struct MarkdownView: View, Equatable {
     let blocks: [MarkdownBlock]
 
@@ -2226,60 +2346,39 @@ struct MarkdownView: View, Equatable {
     }
 
     private func mathText(_ latex: String, display: Bool) -> AttributedString {
+        let cleanLatex = cleanLatex(latex)
+
+        // Inline math: guarantee visibility by converting to readable text
         if !display {
-            // Inline math: Convert to text
-            let text = convertLatexToText(latex)
-            return AttributedString(text)
+            return AttributedString(convertLatexToText(cleanLatex))
         }
 
-        // Display math: Use SwiftMath
-        let cleanLatex = cleanLatex(latex)
+        // Display math: render image
         let fontSize: CGFloat = 22
-
-        // 1. Measure using MTMathUILabel to get the descent
-        let label = MTMathUILabel()
-        label.labelMode = .display
-        label.fontSize = fontSize
-        label.textColor = NSColor.textColor
-        label.latex = cleanLatex
-        label.layout()
-
-        // 2. Render using MTMathImage
         let mathImage = MTMathImage(
-            latex: cleanLatex, fontSize: fontSize, textColor: .textColor,
-            labelMode: .display)
-
+            latex: cleanLatex, fontSize: fontSize, textColor: .textColor, labelMode: .display)
         let (_, image) = mathImage.asImage()
 
-        if let img = image {
-            if img.size.width > 0 && img.size.height > 0 {
-                let attachment = NSTextAttachment()
-                attachment.image = img
+        if let img = image, img.size.width > 0 && img.size.height > 0 {
+            let attachment = NSTextAttachment()
+            attachment.image = img
 
-                // Calculate baseline offset
-                var yOffset: CGFloat = 0
-                if let displayList = label.displayList {
-                    yOffset = -displayList.descent
-                } else {
-                    yOffset = -img.size.height / 2 + (fontSize * 0.25)
-                }
+            let yOffset = -img.size.height / 2 + (fontSize * 0.25)
+            attachment.bounds = CGRect(
+                x: 0, y: yOffset, width: img.size.width, height: img.size.height)
 
-                attachment.bounds = CGRect(
-                    x: 0, y: yOffset, width: img.size.width, height: img.size.height)
+            let nsAttrStr = NSMutableAttributedString(attachment: attachment)
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .center
+            nsAttrStr.addAttribute(
+                .paragraphStyle, value: paragraphStyle,
+                range: NSRange(location: 0, length: nsAttrStr.length))
 
-                let nsAttrStr = NSMutableAttributedString(attachment: attachment)
-
-                let paragraphStyle = NSMutableParagraphStyle()
-                paragraphStyle.alignment = .center
-                nsAttrStr.addAttribute(
-                    .paragraphStyle, value: paragraphStyle,
-                    range: NSRange(location: 0, length: nsAttrStr.length))
-
-                let attrStr = AttributedString(nsAttrStr)
-                return AttributedString("\n") + attrStr + AttributedString("\n")
-            }
+            let attrStr = AttributedString(nsAttrStr)
+            return AttributedString("\n") + attrStr + AttributedString("\n")
         }
 
+        // Fallback: show raw latex delimiters to hint failure
         let delimiter = "$$"
         return AttributedString("\(delimiter)\(latex)\(delimiter)")
     }
@@ -2506,18 +2605,13 @@ struct MarkdownView: View, Equatable {
                     .fixedSize(horizontal: false, vertical: true)
                 case .math(let equation):
                     let cleanEq = cleanLatex(equation)
-                    if isLatexValid(cleanEq) {
-                        HStack {
-                            Spacer()
-                            MathView(equation: cleanEq, fontSize: 18)
-                                .frame(minHeight: 30)
-                                .padding(.vertical, 8)
-                            Spacer()
-                        }
-                    } else {
+                    if cleanEq.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         renderRichText(equation)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, 8)
+                    } else {
+                        MathBlockView(equation: cleanEq)
+                            .frame(maxWidth: .infinity)
                     }
                 case .table(let headers, let rows):
                     ScrollView(.horizontal, showsIndicators: true) {
