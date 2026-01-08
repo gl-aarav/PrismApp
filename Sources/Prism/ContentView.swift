@@ -1538,6 +1538,57 @@ struct HeaderView: View {
     }
 }
 
+class PasteMonitor: ObservableObject {
+    private var monitor: Any?
+    var onPaste: ((NSImage) -> Void)?
+
+    func start() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "v" {
+                let pb = NSPasteboard.general
+
+                // 1. Try reading as File URL first (to prefer high-res file over icon)
+                if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+                    let url = urls.first
+                {
+                    let imageExtensions = [
+                        "png", "jpg", "jpeg", "tiff", "gif", "bmp", "webp", "heic",
+                    ]
+                    if imageExtensions.contains(url.pathExtension.lowercased()) {
+                        if let image = NSImage(contentsOf: url) {
+                            self.onPaste?(image)
+                            return nil
+                        }
+                    }
+                }
+
+                // 2. Fallback to NSImage (e.g. copied screenshots, or Finder icons if file load failed)
+                if let objects = pb.readObjects(forClasses: [NSImage.self], options: nil)
+                    as? [NSImage],
+                    let image = objects.first
+                {
+                    self.onPaste?(image)
+                    return nil
+                }
+            }
+            return event
+        }
+    }
+
+    func stop() {
+        if let monitor = monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    deinit {
+        stop()
+    }
+}
+
 struct InputView: View {
     @Binding var inputText: String
     @Binding var selectedImage: NSImage?
@@ -1550,9 +1601,44 @@ struct InputView: View {
     var showThinking: Bool
 
     @FocusState private var isFocused: Bool
+    @StateObject private var pasteMonitor = PasteMonitor()
 
     var body: some View {
         VStack(spacing: 0) {
+            imagePreview
+            inputBar
+        }
+        .padding()
+        .onDrop(of: [.image, .fileURL], isTargeted: nil) { providers in
+            handlePaste(providers)
+            return true
+        }
+        .onAppear {
+            setupMonitor()
+        }
+        .onChange(of: isFocused) { _, focused in
+            if focused {
+                pasteMonitor.start()
+            } else {
+                pasteMonitor.stop()
+            }
+        }
+    }
+
+    private func setupMonitor() {
+        pasteMonitor.onPaste = { image in
+            DispatchQueue.main.async {
+                self.selectedImage = image
+            }
+        }
+        // If already focused on appear (rare but possible)
+        if isFocused {
+            pasteMonitor.start()
+        }
+    }
+
+    private var imagePreview: some View {
+        Group {
             if let image = selectedImage {
                 HStack {
                     Image(nsImage: image)
@@ -1573,101 +1659,102 @@ struct InputView: View {
                 .background(.ultraThinMaterial)
                 .cornerRadius(12)
             }
-
-            HStack(spacing: 12) {
-                if !isImageGen {
-                    Button(action: onSelectImage) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                ZStack(alignment: .leading) {
-                    if inputText.isEmpty && !isFocused {
-                        Text(isImageGen ? "Describe image to generate..." : "Ask AI anything...")
-                            .font(.system(size: 16))
-                            .foregroundColor(.secondary)
-                            .allowsHitTesting(false)
-                            .padding(.leading, 4)
-                    }
-
-                    TextField("", text: $inputText, axis: .vertical)
-                        .focused($isFocused)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 16))
-                        .lineLimit(1...10)
-                        .onKeyPress(.return) {
-                            if NSEvent.modifierFlags.contains(.shift) {
-                                return .ignored
-                            } else {
-                                onSend()
-                                return .handled
-                            }
-                        }
-                        .onPasteCommand(of: [.image, .fileURL]) { providers in
-                            handlePaste(providers)
-                        }
-                }
-
-                if showThinking {
-                    Menu {
-                        Picker("Reasoning Effort", selection: $thinkingLevel) {
-                            Text("Low").tag("low")
-                            Text("Medium").tag("medium")
-                            Text("High").tag("high")
-                        }
-                    } label: {
-                        Image(systemName: "brain")
-                            .font(.system(size: 16))
-                            .foregroundColor(thinkingLevel == "medium" ? .secondary : .blue)
-                            .padding(8)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Circle())
-                    }
-                    .menuStyle(.borderlessButton)
-                    .help("Reasoning Effort for Supported Models")
-                }
-
-                if isLoading {
-                    Button(action: onStop) {
-                        Image(systemName: "stop.circle.fill")
-                            .font(.system(size: 28))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(Color.red.gradient)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Button(action: onSend) {
-                        Image(systemName: isImageGen ? "paintbrush.fill" : "arrow.up.circle.fill")
-                            .font(.system(size: 28))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(
-                                inputText.isEmpty && selectedImage == nil
-                                    ? Color.gray.gradient : Color.blue.gradient)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled((inputText.isEmpty && selectedImage == nil) || isLoading)
-                }
-            }
-            .padding(12)
-            .background(.ultraThinMaterial)
-            .background(Color.white.opacity(0.05))
-            .cornerRadius(30)
-            .overlay(
-                RoundedRectangle(cornerRadius: 30)
-                    .stroke(
-                        LinearGradient(
-                            colors: [.white.opacity(0.3), .white.opacity(0.1)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
         }
-        .padding()
-        .onDrop(of: [.image, .fileURL], isTargeted: nil) { providers in
-            handlePaste(providers)
-            return true
+    }
+
+    private var inputBar: some View {
+        HStack(spacing: 12) {
+            if !isImageGen {
+                Button(action: onSelectImage) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            inputField
+
+            if showThinking {
+                Menu {
+                    Picker("Reasoning Effort", selection: $thinkingLevel) {
+                        Text("Low").tag("low")
+                        Text("Medium").tag("medium")
+                        Text("High").tag("high")
+                    }
+                } label: {
+                    Image(systemName: "brain")
+                        .font(.system(size: 16))
+                        .foregroundColor(thinkingLevel == "medium" ? .secondary : .blue)
+                        .padding(8)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .menuStyle(.borderlessButton)
+                .help("Reasoning Effort for Supported Models")
+            }
+
+            if isLoading {
+                Button(action: onStop) {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.system(size: 28))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.red.gradient)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button(action: onSend) {
+                    Image(systemName: isImageGen ? "paintbrush.fill" : "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(
+                            inputText.isEmpty && selectedImage == nil
+                                ? Color.gray.gradient : Color.blue.gradient)
+                }
+                .buttonStyle(.plain)
+                .disabled((inputText.isEmpty && selectedImage == nil) || isLoading)
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial)
+        .background(Color.white.opacity(0.05))
+        .cornerRadius(30)
+        .overlay(
+            RoundedRectangle(cornerRadius: 30)
+                .stroke(
+                    LinearGradient(
+                        colors: [.white.opacity(0.3), .white.opacity(0.1)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+    }
+
+    private var inputField: some View {
+        ZStack(alignment: .leading) {
+            if inputText.isEmpty && !isFocused {
+                Text(isImageGen ? "Describe image to generate..." : "Ask AI anything...")
+                    .font(.system(size: 16))
+                    .foregroundColor(.secondary)
+                    .allowsHitTesting(false)
+                    .padding(.leading, 4)
+            }
+
+            TextField("", text: $inputText, axis: .vertical)
+                .focused($isFocused)
+                .textFieldStyle(.plain)
+                .font(.system(size: 16))
+                .lineLimit(1...10)
+                .onKeyPress(.return) {
+                    if NSEvent.modifierFlags.contains(.shift) {
+                        return .ignored
+                    } else {
+                        onSend()
+                        return .handled
+                    }
+                }
+                .onPasteCommand(of: [.image, .fileURL]) { providers in
+                    handlePaste(providers)
+                }
         }
     }
 
