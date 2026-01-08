@@ -1961,13 +1961,13 @@ struct MathBlockView: View {
 
     var body: some View {
         VStack {
-            KaTeXView(latex: equation, fontSize: 20, height: $height, didRender: $didRender)
+            KaTeXView(latex: equation, fontSize: 14, height: $height, didRender: $didRender)
                 .frame(height: height)
                 .frame(maxWidth: .infinity)
                 .opacity(didRender ? 1 : 0)
 
             if !didRender {
-                MathView(equation: equation, fontSize: 18)
+                MathView(equation: equation, fontSize: 14)
                     .frame(minHeight: 30)
                     .padding(.vertical, 4)
             }
@@ -2354,7 +2354,7 @@ struct MarkdownView: View, Equatable {
         }
 
         // Display math: render image
-        let fontSize: CGFloat = 22
+        let fontSize: CGFloat = 16
         let mathImage = MTMathImage(
             latex: cleanLatex, fontSize: fontSize, textColor: .textColor, labelMode: .display)
         let (_, image) = mathImage.asImage()
