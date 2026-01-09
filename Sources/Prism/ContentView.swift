@@ -1027,108 +1027,147 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            NavigationSplitView {
-                SidebarView(chatManager: chatManager)
-            } detail: {
-                ZStack {
-                    // Background Layer
-                    GeometryReader { geometry in
-                        if !backgroundImagePath.isEmpty,
-                            let image = NSImage(contentsOfFile: backgroundImagePath)
-                        {
-                            Image(nsImage: image)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: geometry.size.width, height: geometry.size.height)
-                                .clipped()
-                                .opacity(0.3)
-                        } else {
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color(nsColor: .windowBackgroundColor),
-                                    Color.blue.opacity(0.05),
-                                ]), startPoint: .top, endPoint: .bottom
-                            )
-                            .frame(width: geometry.size.width, height: geometry.size.height)
+            // Background Layer
+            GeometryReader { geometry in
+                if !backgroundImagePath.isEmpty,
+                    let image = NSImage(contentsOfFile: backgroundImagePath)
+                {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                } else {
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            NeonTheme.background,
+                            Color.black,
+                        ]), startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+            }
+            .ignoresSafeArea()
+
+            // Main Content Layout
+            HStack(spacing: 0) {
+                // Floating Sidebar
+                if showSidebar {
+                    ZStack(alignment: .topTrailing) {
+                        SidebarView(chatManager: chatManager)
+                            .frame(width: 260)
+                            .padding(.vertical, 20)
+                            .padding(.leading, 20)
+
+                        // Close sidebar button
+                        Button(action: { withAnimation { showSidebar = false } }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                                .padding(8)
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 10, y: 10)
+                        .zIndex(2)
+                    }
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .zIndex(2)
+                } else {
+                    // Toggle button when sidebar is hidden
+                    VStack {
+                        Button(action: { withAnimation { showSidebar = true } }) {
+                            Image(systemName: "sidebar.left")
+                                .font(.system(size: 20))
+                                .foregroundColor(.secondary)
+                                .padding(12)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 20)
+                        .padding(.leading, 20)
+                        Spacer()
+                    }
+                    .transition(.opacity)
+                    .zIndex(3)
+                }
+
+                // Chat Area
+                if isWebViewProvider(selectedProvider) {
+                    VStack(spacing: 0) {
+                        HeaderView(
+                            selectedProvider: $selectedProvider,
+                            showSettings: $showSettings,
+                            onNewChat: chatManager.createNewSession
+                        )
+
+                        if let url = getWebURL(for: selectedProvider) {
+                            WebView(url: url)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 20))
+                                .padding(20)
                         }
                     }
-                    .ignoresSafeArea()
+                } else {
+                    VStack(spacing: 0) {
+                        HeaderView(
+                            selectedProvider: $selectedProvider,
+                            showSettings: $showSettings,
+                            onNewChat: chatManager.createNewSession
+                        )
 
-                    // Content Layer
-                    if isWebViewProvider(selectedProvider) {
-                        VStack(spacing: 0) {
-                            HeaderView(
-                                selectedProvider: $selectedProvider,
-                                showSettings: $showSettings,
-                                onNewChat: chatManager.createNewSession
-                            )
-
-                            if let url = getWebURL(for: selectedProvider) {
-                                WebView(url: url)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            }
-                        }
-                    } else {
-                        VStack(spacing: 0) {
-                            HeaderView(
-                                selectedProvider: $selectedProvider,
-                                showSettings: $showSettings,
-                                onNewChat: chatManager.createNewSession
-                            )
-
-                            ScrollViewReader { proxy in
-                                ScrollView {
-                                    LazyVStack(spacing: 24) {
-                                        let messages = chatManager.getCurrentMessages()
-                                        if messages.isEmpty {
-                                            EmptyStateView()
-                                        } else {
-                                            ForEach(messages) { message in
-                                                MessageView(
-                                                    message: message,
-                                                    onRegenerate: (!message.isUser && !isLoading)
-                                                        ? { regenerateResponse(for: message.id) }
-                                                        : nil
-                                                )
-                                                .equatable()
-                                            }
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVStack(spacing: 24) {
+                                    let messages = chatManager.getCurrentMessages()
+                                    if messages.isEmpty {
+                                        EmptyStateView()
+                                    } else {
+                                        ForEach(messages) { message in
+                                            MessageView(
+                                                message: message,
+                                                onRegenerate: (!message.isUser && !isLoading)
+                                                    ? { regenerateResponse(for: message.id) }
+                                                    : nil
+                                            )
+                                            .equatable()
                                         }
-                                        if isLoading {
-                                            HStack {
-                                                TypingIndicator()
-                                                Spacer()
-                                            }
+                                    }
+                                    if isLoading {
+                                        NeonLoadingBar()
                                             .padding(.horizontal)
                                             .id("typingIndicator")
-                                        }
+                                            .padding(.vertical, 8)
                                     }
-                                    .padding()
                                 }
-                                .safeAreaInset(edge: .bottom) {
-                                    InputView(
-                                        inputText: $inputText,
-                                        selectedImage: $selectedImage,
-                                        thinkingLevel: $thinkingLevel,
-                                        isLoading: isLoading,
-                                        onSend: sendMessage,
-                                        onStop: stopGeneration,
-                                        onSelectImage: selectImage,
-                                        isImageGen: selectedProvider == "Image Creation",
-                                        showThinking: selectedProvider == "Ollama"
-                                            || selectedProvider == "Gemini API"
-                                    )
-                                }
-                                .onChange(of: chatManager.getCurrentMessages().count) { _, count in
-                                    handleScroll(proxy: proxy, newCount: count)
-                                }
-                                .onChange(of: chatManager.currentSessionId) { _, _ in
-                                    handleScroll(proxy: proxy)
-                                }
-                                .onChange(of: isLoading) { _, loading in
-                                    if loading {
-                                        withAnimation {
-                                            proxy.scrollTo("typingIndicator", anchor: .bottom)
-                                        }
+                                .padding()
+                            }
+                            // Input view sitting at the bottom
+                            .safeAreaInset(edge: .bottom) {
+                                InputView(
+                                    inputText: $inputText,
+                                    selectedImage: $selectedImage,
+                                    thinkingLevel: $thinkingLevel,
+                                    isLoading: isLoading,
+                                    onSend: sendMessage,
+                                    onStop: stopGeneration,
+                                    onSelectImage: selectImage,
+                                    isImageGen: selectedProvider == "Image Creation",
+                                    showThinking: selectedProvider == "Ollama"
+                                        || selectedProvider == "Gemini API"
+                                )
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 20)
+                            }
+                            .onChange(of: chatManager.getCurrentMessages().count) { _, count in
+                                handleScroll(proxy: proxy, newCount: count)
+                            }
+                            .onChange(of: chatManager.currentSessionId) { _, _ in
+                                handleScroll(proxy: proxy)
+                            }
+                            .onChange(of: isLoading) { _, loading in
+                                if loading {
+                                    withAnimation {
+                                        proxy.scrollTo("typingIndicator", anchor: .bottom)
                                     }
                                 }
                             }
@@ -1136,42 +1175,39 @@ struct ContentView: View {
                     }
                 }
             }
-            .frame(minWidth: 800, minHeight: 500)
-            .popover(isPresented: $showSettings) {
-                SettingsView(
-                    geminiKey: $geminiKey,
-                    geminiModel: $geminiModel,
-                    ollamaURL: $ollamaURL,
-                    ollamaModel: $ollamaModel,
-                    shortcutPrivateCloud: $shortcutPrivateCloud,
-                    shortcutOnDevice: $shortcutOnDevice,
-                    shortcutChatGPT: $shortcutChatGPT,
-                    shortcutImageGen: $shortcutImageGen,
-                    backgroundImagePath: $backgroundImagePath
-                )
-                .environmentObject(chatManager)
-            }
-            .disabled(showSplash)  // Disable main content when splash is showing to prevent focus ring bleed-through
-            .toolbar(showSplash ? .hidden : .visible, for: .windowToolbar)
-
-            if !hasSeenWelcome {
-                WelcomeView {
-                    withAnimation {
-                        hasSeenWelcome = true
+        }
+        .frame(minWidth: 900, minHeight: 600)
+        .popover(isPresented: $showSettings) {
+            SettingsView(
+                geminiKey: $geminiKey,
+                geminiModel: $geminiModel,
+                ollamaURL: $ollamaURL,
+                ollamaModel: $ollamaModel,
+                shortcutPrivateCloud: $shortcutPrivateCloud,
+                shortcutOnDevice: $shortcutOnDevice,
+                shortcutChatGPT: $shortcutChatGPT,
+                shortcutImageGen: $shortcutImageGen,
+                backgroundImagePath: $backgroundImagePath
+            )
+            .environmentObject(chatManager)
+        }
+        .disabled(showSplash)
+        .overlay(
+            Group {
+                if showSplash {
+                    SplashScreen {
+                        showSplash = false
                     }
                 }
-                .transition(.opacity)
-                .zIndex(100)
-            }
-
-            if showSplash {
-                SplashScreen {
-                    showSplash = false
+                if !hasSeenWelcome {
+                    WelcomeView {
+                        withAnimation {
+                            hasSeenWelcome = true
+                        }
+                    }
                 }
-                .transition(.opacity)
-                .zIndex(200)
             }
-        }
+        )
     }
 
     func isWebViewProvider(_ provider: String) -> Bool {
@@ -1426,34 +1462,56 @@ struct SidebarView: View {
     @ObservedObject var chatManager: ChatManager
 
     var body: some View {
-        List(selection: $chatManager.currentSessionId) {
-            ForEach(chatManager.sessions) { session in
-                Text(session.title)
-                    .tag(session.id)
-                    .contextMenu {
-                        if !session.messages.isEmpty {
-                            Button("Export Chat") {
-                                exportChat(session)
-                            }
-                            Divider()
-                            Button("Delete") {
-                                chatManager.deleteSession(id: session.id)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Chats")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+            List(selection: $chatManager.currentSessionId) {
+                ForEach(chatManager.sessions) { session in
+                    Text(session.title)
+                        .font(.system(size: 14))
+                        .tag(session.id)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .padding(.vertical, 4)
+                        .contextMenu {
+                            if !session.messages.isEmpty {
+                                Button("Export Chat") {
+                                    exportChat(session)
+                                }
+                                Divider()
+                                Button("Delete") {
+                                    chatManager.deleteSession(id: session.id)
+                                }
                             }
                         }
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        if !session.messages.isEmpty {
-                            Button(role: .destructive) {
-                                chatManager.deleteSession(id: session.id)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            if !session.messages.isEmpty {
+                                Button(role: .destructive) {
+                                    chatManager.deleteSession(id: session.id)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
-                    }
+                }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
         }
-        .listStyle(.sidebar)
-        .navigationTitle("Chats")
+        .background(.ultraThinMaterial)
+        .background(NeonTheme.background.opacity(0.5))
+        .cornerRadius(16)
+        .padding(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                .padding(12)
+        )
+        .navigationTitle("")
     }
 
     func exportChat(_ session: ChatSession) {
@@ -1480,28 +1538,63 @@ struct HeaderView: View {
     var onNewChat: () -> Void
 
     var body: some View {
-        HStack {
-            Picker("Model", selection: $selectedProvider) {
-                Section("API") {
-                    Text("Gemini API").tag("Gemini API")
-                    Text("Ollama").tag("Ollama")
+        HStack(spacing: 12) {
+            // Model Picker (Floating Pill)
+            Menu {
+                Picker("Model", selection: $selectedProvider) {
+                    Section("API") {
+                        Text("Gemini API").tag("Gemini API")
+                        Text("Ollama").tag("Ollama")
+                    }
+                    Section("Shortcuts") {
+                        Text("Private Cloud").tag("Private Cloud")
+                        Text("On-Device").tag("On-Device")
+                        Text("ChatGPT").tag("ChatGPT")
+                    }
+                    Section("Web View") {
+                        Text("Gemini Web").tag("Gemini Web")
+                        Text("ChatGPT Web").tag("ChatGPT Web")
+                        Text("Perplexity Web").tag("Perplexity Web")
+                        Text("Grok Web").tag("Grok Web")
+                    }
+                    Section("Tools") {
+                        Text("Image Creation").tag("Image Creation")
+                    }
                 }
-                Section("Shortcuts") {
-                    Text("Private Cloud").tag("Private Cloud")
-                    Text("On-Device").tag("On-Device")
-                    Text("ChatGPT").tag("ChatGPT")
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: getProviderIcon(selectedProvider))
+                        .foregroundStyle(NeonTheme.gradient)
+                    Text(selectedProvider)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Section("Web View") {
-                    Text("Gemini Web").tag("Gemini Web")
-                    Text("ChatGPT Web").tag("ChatGPT Web")
-                    Text("Perplexity Web").tag("Perplexity Web")
-                    Text("Grok Web").tag("Grok Web")
-                }
-                Section("Tools") {
-                    Text("Image Creation").tag("Image Creation")
-                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial)
+                .background(NeonTheme.background.opacity(0.6))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    NeonTheme.primary.opacity(0.3),
+                                    NeonTheme.secondary.opacity(0.3),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: Color.black.opacity(0.2), radius: 4, x: 0, y: 2)
             }
-            .frame(width: 250)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
             .focusEffectDisabled()
 
             Spacer()
@@ -1509,32 +1602,65 @@ struct HeaderView: View {
             if !["Gemini Web", "ChatGPT Web", "Perplexity Web", "Grok Web"].contains(
                 selectedProvider)
             {
+                // New Chat Button (Floating Pill)
                 Button(action: onNewChat) {
-                    HStack {
+                    HStack(spacing: 6) {
                         Image(systemName: "plus")
                         Text("New Chat")
                     }
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 12)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                     .background(.ultraThinMaterial)
-                    .cornerRadius(20)
+                    .background(NeonTheme.background.opacity(0.6))
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.2), radius: 4, x: 0, y: 2)
                 }
                 .buttonStyle(.plain)
 
+                // Settings Button (Floating Circle)
                 Button(action: { showSettings = true }) {
                     Image(systemName: "gearshape.fill")
+                        .font(.system(size: 16))
                         .foregroundColor(.secondary)
-                        .padding(8)
+                        .frame(width: 36, height: 36)
                         .background(.ultraThinMaterial)
+                        .background(NeonTheme.background.opacity(0.6))
                         .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.2), radius: 4, x: 0, y: 2)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding()
-        // Transparent background
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 10)
+    }
+
+    func getProviderIcon(_ provider: String) -> String {
+        switch provider {
+        case "On-Device": return "iphone"
+        case "Private Cloud": return "lock.icloud"
+        case "Gemini API": return "sparkles"
+        case "Ollama": return "laptopcomputer"
+        case "ChatGPT": return "message"
+        case "Image Creation": return "paintbrush"
+        case "Gemini Web": return "globe"
+        case "ChatGPT Web": return "globe"
+        case "Perplexity Web": return "magnifyingglass"
+        case "Grok Web": return "bolt"
+        default: return "cpu"
+        }
     }
 }
 
@@ -1687,7 +1813,7 @@ struct InputView: View {
                         .font(.system(size: 16))
                         .foregroundColor(thinkingLevel == "medium" ? .secondary : .blue)
                         .padding(8)
-                        .background(.ultraThinMaterial)
+                        .background(Color.white.opacity(0.1))
                         .clipShape(Circle())
                 }
                 .menuStyle(.borderlessButton)
@@ -1709,7 +1835,8 @@ struct InputView: View {
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(
                             inputText.isEmpty && selectedImage == nil
-                                ? Color.gray.gradient : Color.blue.gradient)
+                                ? AnyShapeStyle(Color.gray.gradient)
+                                : AnyShapeStyle(NeonTheme.gradient))
                 }
                 .buttonStyle(.plain)
                 .disabled((inputText.isEmpty && selectedImage == nil) || isLoading)
@@ -1723,7 +1850,10 @@ struct InputView: View {
             RoundedRectangle(cornerRadius: 30)
                 .stroke(
                     LinearGradient(
-                        colors: [.white.opacity(0.3), .white.opacity(0.1)],
+                        colors: [
+                            Color.white.opacity(0.2),
+                            Color.white.opacity(0.1),
+                        ],
                         startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
@@ -2669,18 +2799,15 @@ struct EmptyStateView: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 60, height: 60)
                 .foregroundStyle(
-                    LinearGradient(
-                        colors: [.blue, .teal],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                    NeonTheme.gradient
                 )
                 .padding()
                 .background(
                     Circle()
                         .fill(.ultraThinMaterial)
-                        .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+                        .shadow(color: NeonTheme.primary.opacity(0.2), radius: 10, x: 0, y: 5)
                 )
+                .neonGlow(color: NeonTheme.primary, radius: 10)
 
             Text("Start a New Conversation")
                 .font(.title2)
@@ -2721,19 +2848,24 @@ struct MessageView: View, Equatable {
                     }
                     Text(message.content)
                         .padding(12)
-                        .background(Color.blue.opacity(0.2))
+                        .background(NeonTheme.primary.opacity(0.2))
                         .background(.ultraThinMaterial)
                         .cornerRadius(16)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(NeonTheme.primary.opacity(0.5), lineWidth: 1)
+                        )
+                        .shadow(color: NeonTheme.primary.opacity(0.1), radius: 5)
                 }
                 .frame(maxWidth: maxBubbleWidth, alignment: .trailing)
             } else {
                 Image(systemName: "sparkles")
                     .foregroundStyle(
-                        LinearGradient(
-                            colors: [.blue, .green], startPoint: .top, endPoint: .bottom)
+                        NeonTheme.gradient
                     )
                     .font(.title2)
                     .frame(width: 30)
+                    .neonGlow(color: NeonTheme.primary, radius: 5)
 
                 VStack(alignment: .leading, spacing: 8) {
                     if let thinking = message.thinkingContent {
@@ -3001,11 +3133,9 @@ struct WelcomeView: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 80))
                     .foregroundStyle(
-                        LinearGradient(
-                            colors: [.blue, .green], startPoint: .topLeading,
-                            endPoint: .bottomTrailing)
+                        NeonTheme.gradient
                     )
-                    .shadow(radius: 10)
+                    .shadow(color: NeonTheme.primary, radius: 20)
 
                 VStack(spacing: 10) {
                     Text("Welcome to Prism")
@@ -3019,10 +3149,11 @@ struct WelcomeView: View {
                 Button(action: onDismiss) {
                     Text("Get Started")
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(.black)
                         .frame(width: 200, height: 50)
-                        .background(Color.blue)
+                        .background(NeonTheme.primary)
                         .cornerRadius(25)
+                        .neonGlow(color: NeonTheme.primary, radius: 10)
                 }
                 .buttonStyle(.plain)
             }
@@ -3045,13 +3176,10 @@ struct SplashScreen: View {
             VStack(spacing: 20) {
                 ZStack {
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [.cyan, .blue, .green], startPoint: .topLeading,
-                                endPoint: .bottomTrailing)
-                        )
+                        .fill(NeonTheme.gradient)
                         .frame(width: 120, height: 120)
                         .blur(radius: 20)
+                        .neonGlow(color: NeonTheme.primary)
 
                     Triangle()
                         .stroke(
@@ -3071,9 +3199,9 @@ struct SplashScreen: View {
                 Text("Prism")
                     .font(.system(size: 60, weight: .thin))
                     .foregroundStyle(
-                        LinearGradient(
-                            colors: [.cyan, .blue, .green], startPoint: .leading,
-                            endPoint: .trailing))
+                        NeonTheme.gradient
+                    )
+                    .neonGlow(color: NeonTheme.primary, radius: 10)
             }
         }
         .onAppear {
@@ -3147,11 +3275,12 @@ struct QuickChatView: View {
                         if isLoading {
                             HStack {
                                 Spacer()
-                                ProgressView()
-                                    .scaleEffect(0.5)
+                                NeonLoadingBar()
+                                    .frame(width: 100)
                                 Spacer()
                             }
                             .id("loading")
+                            .padding(.vertical, 8)
                         }
                     }
                     .padding()
@@ -3176,14 +3305,16 @@ struct QuickChatView: View {
                 Button(action: sendMessage) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title2)
+                        .foregroundStyle(NeonTheme.gradient)
                 }
                 .buttonStyle(.plain)
                 .disabled(inputText.isEmpty || isLoading)
             }
             .padding(10)
-            .background(Color.black.opacity(0.1))
+            .background(NeonTheme.background.opacity(0.5))
         }
         .frame(width: 350, height: 500)
+        .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
     }
 
     func sendMessage() {
