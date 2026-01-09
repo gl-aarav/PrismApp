@@ -30,11 +30,135 @@ struct QuickAIView: View {
     var body: some View {
         VStack(spacing: 0) {
             if isExpanded {
-                headerView
-                messagesView
+                // Header
+                HStack {
+                    Menu {
+                        Picker("Model", selection: $selectedProvider) {
+                            Section("API") {
+                                Text("Gemini API").tag("Gemini API")
+                                Text("Ollama").tag("Ollama")
+                            }
+                            Section("Shortcuts") {
+                                Text("Private Cloud").tag("Private Cloud")
+                                Text("On-Device").tag("On-Device")
+                                Text("ChatGPT").tag("ChatGPT")
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: getProviderIcon(selectedProvider))
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [.blue, .green], startPoint: .topLeading,
+                                        endPoint: .bottomTrailing))
+                            Text(selectedProvider)
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+
+                    Spacer()
+
+                    // New Chat
+                    Button(action: {
+                        chatManager.deleteAllSessions()
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                            isExpanded = false
+                        }
+                    }) {
+                        Image(systemName: "square.and.pencil")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("New Chat")
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+
+                // Messages
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 16) {
+                            ForEach(chatManager.getCurrentMessages()) { message in
+                                QuickAIMessageView(message: message)
+                            }
+                            if isLoading {
+                                HStack {
+                                    TypingIndicator()
+                                    Spacer()
+                                }
+                                .padding(.horizontal)
+                                .id("loading")
+                            }
+                        }
+                        .padding(20)
+                    }
+                    .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
+                        if let lastId = chatManager.getCurrentMessages().last?.id {
+                            withAnimation {
+                                proxy.scrollTo(lastId, anchor: .bottom)
+                            }
+                        }
+                    }
+                    .onChange(of: isLoading) { _, loading in
+                        if loading {
+                            withAnimation {
+                                proxy.scrollTo("loading", anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+
                 Divider()
             }
-            inputAreaView
+
+            // Input Area
+            HStack(alignment: .center, spacing: 12) {
+                TextField("Request...", text: $inputText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 16))
+                    .lineLimit(1...6)
+                    .multilineTextAlignment(.leading)
+                    .focused($isFocused)
+                    .onSubmit { sendMessage() }
+
+                // Thinking Level Selector
+                if selectedProvider == "Ollama" || selectedProvider == "Gemini API" {
+                    Menu {
+                        Picker("Thinking Effort", selection: $thinkingLevel) {
+                            Text("Low").tag("low")
+                            Text("Medium").tag("medium")
+                            Text("High").tag("high")
+                        }
+                    } label: {
+                        Image(systemName: "brain")
+                            .font(.system(size: 16))
+                            .foregroundColor(thinkingLevel == "medium" ? .secondary : .blue)
+                            .padding(4)
+                            .background(Color.gray.opacity(0.1))
+                            .clipShape(Circle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help("Reasoning Effort")
+                }
+
+                Button(action: sendMessage) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(
+                            inputText.isEmpty ? Color.gray.gradient : Color.blue.gradient)
+                }
+                .buttonStyle(.plain)
+                .disabled(inputText.isEmpty || isLoading)
+            }
+            .padding(16)
+            .background(.ultraThinMaterial)
         }
         .background(
             VisualEffectView(
@@ -59,6 +183,7 @@ struct QuickAIView: View {
         }
     }
 
+<<<<<<< HEAD
     private var headerView: some View {
         HStack {
             Menu {
@@ -192,6 +317,8 @@ struct QuickAIView: View {
         )
     }
 
+=======
+>>>>>>> parent of 74afb81 (Refactor ContentView and QuickAIView for improved layout; add NeonLoadingBar and NeonTheme for consistent styling)
     func getProviderIcon(_ provider: String) -> String {
         switch provider {
         case "On-Device": return "iphone"
@@ -367,21 +494,18 @@ struct QuickAIMessageView: View {
                 Text(message.content)
                     .font(.system(size: 14))
                     .padding(12)
-                    .background(NeonTheme.primary.opacity(0.8))
-                    .foregroundColor(.black)
+                    .background(Color.blue.opacity(0.8))
+                    .foregroundColor(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(NeonTheme.primary.opacity(0.5), lineWidth: 1)
-                    )
             } else {
                 Image(systemName: "sparkles")
                     .foregroundStyle(
-                        NeonTheme.gradient
+                        LinearGradient(
+                            colors: [.blue, .green], startPoint: .topLeading,
+                            endPoint: .bottomTrailing)
                     )
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(.ultraThinMaterial))
-                    .neonGlow(color: NeonTheme.primary, radius: 4)
 
                 VStack(alignment: .leading, spacing: 8) {
                     if let thinking = message.thinkingContent {
