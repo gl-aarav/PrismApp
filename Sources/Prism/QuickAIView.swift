@@ -183,7 +183,6 @@ struct QuickAIView: View {
         }
     }
 
-
     func getProviderIcon(_ provider: String) -> String {
         switch provider {
         case "On-Device": return "iphone"
