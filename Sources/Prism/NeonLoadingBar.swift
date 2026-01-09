@@ -8,7 +8,7 @@ struct NeonLoadingBar: View {
             ZStack(alignment: .leading) {
                 // Background track
                 Capsule()
-                    .fill(Color.white.opacity(0.1))
+                    .fill(Color.primary.opacity(0.1))
                     .frame(height: 4)
 
                 // Animated bar

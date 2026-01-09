@@ -11,6 +11,7 @@ struct QuickAIView: View {
     @State private var thinkingLevel: String = "medium"
     @State private var isExpanded: Bool = false
     @FocusState private var isFocused: Bool
+    @Environment(\.colorScheme) var colorScheme
 
     // Settings
     @AppStorage("GeminiKey") private var geminiKey: String = ""
@@ -35,9 +36,16 @@ struct QuickAIView: View {
             }
             inputAreaView
         }
-        .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+        .background(
+            VisualEffectView(
+                material: colorScheme == .dark ? .hudWindow : .popover, blendingMode: .behindWindow)
+        )
         .cornerRadius(26)
-        .overlay(RoundedRectangle(cornerRadius: 26).stroke(Color.white.opacity(0.1), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 26).stroke(
+                colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1),
+                lineWidth: 1)
+        )
         .onAppear {
             isFocused = true
             onResize?(CGSize(width: 700, height: 80))
@@ -179,17 +187,8 @@ struct QuickAIView: View {
         }
         .padding(16)
         .background(.ultraThinMaterial)
-        .background(NeonTheme.background.opacity(0.8))
-        .overlay(
-            Rectangle()
-                .frame(height: 1)
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [NeonTheme.primary, NeonTheme.secondary], startPoint: .leading,
-                        endPoint: .trailing)
-                )
-                .opacity(0.3),
-            alignment: .top
+        .background(
+            colorScheme == .dark ? NeonTheme.background.opacity(0.8) : Color.white.opacity(0.5)
         )
     }
 
