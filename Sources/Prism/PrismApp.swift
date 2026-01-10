@@ -142,7 +142,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Slightly inset and round more to match native macOS icon silhouette
         let inset = min(size.width, size.height) * 0.095  // slightly larger glyph (~1px more)
         let imageRect = NSRect(origin: .zero, size: size).insetBy(dx: inset, dy: inset)
-        let radius = min(imageRect.width, imageRect.height) * 0.22
+        let radius = min(imageRect.width, imageRect.height) * 0.25
 
         let newImage = NSImage(size: size)
         newImage.lockFocus()
