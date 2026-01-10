@@ -3107,83 +3107,218 @@ struct QuickChatView: View {
     private let shortcutService = ShortcutService()
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Quick Chat")
-                    .font(.headline)
-                Spacer()
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color.blue.opacity(0.35), Color.green.opacity(0.25),
+                    Color.black.opacity(0.15),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
 
-                Button(action: {
-                    chatManager.deleteAllSessions()  // For Quick Chat, we just clear everything
-                }) {
-                    Image(systemName: "square.and.pencil")
+            RoundedRectangle(cornerRadius: 22)
+                .fill(Color.white.opacity(0.02))
+                .background(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.25), Color.white.opacity(0.08)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1
+                        )
+                )
+                .shadow(color: Color.black.opacity(0.25), radius: 18, x: 0, y: 10)
+
+            VStack(spacing: 12) {
+                headerBar
+                messagesSection
+                inputBar
+            }
+            .padding(12)
+        }
+        .frame(width: 360, height: 520)
+    }
+
+    private var headerBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [.cyan.opacity(0.9), .blue, .green.opacity(0.9)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing)
+                        )
+                        .frame(width: 32, height: 32)
+                        .shadow(color: Color.blue.opacity(0.35), radius: 6, x: 0, y: 4)
+
+                    Image(systemName: "triangle.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .rotationEffect(.degrees(180))
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Prism Mini")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Menu Bar")
+                        .font(.caption2)
                         .foregroundColor(.secondary)
                 }
-                .buttonStyle(.plain)
-                .help("New Chat")
-
-                Picker("", selection: $selectedProvider) {
-                    Text("Gemini API").tag("Gemini API")
-                    Text("Ollama").tag("Ollama")
-                    Text("Private Cloud").tag("Private Cloud")
-                    Text("On-Device").tag("On-Device")
-                    Text("ChatGPT").tag("ChatGPT")
-                }
-                .labelsHidden()
-                .frame(width: 120)
-                .focusEffectDisabled()
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .background(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.35), .white.opacity(0.15)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
 
-            // Messages
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(chatManager.getCurrentMessages()) { message in
-                            MessageView(message: message, maxBubbleWidth: 300)
-                        }
-                        if isLoading {
-                            HStack {
-                                Spacer()
-                                ProgressView()
-                                    .scaleEffect(0.5)
-                                Spacer()
-                            }
-                            .id("loading")
-                        }
-                    }
-                    .padding()
-                    .padding(.bottom, 20)
-                }
-                .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
-                    if let lastId = chatManager.getCurrentMessages().last?.id {
-                        withAnimation {
-                            proxy.scrollTo(lastId, anchor: .bottom)
-                        }
-                    }
-                }
+            Spacer()
+
+            Button(action: {
+                chatManager.deleteAllSessions()  // For Quick Chat, we just clear everything
+            }) {
+                Label("New", systemImage: "square.and.pencil")
+                    .labelStyle(.iconOnly)
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(8)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.2), Color.green.opacity(0.2)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .foregroundColor(.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
             }
+            .buttonStyle(.plain)
+            .help("New Chat")
 
-            // Input
-            HStack(alignment: .bottom) {
-                TextField("Ask anything...", text: $inputText, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...6)
-                    .onSubmit(sendMessage)
-
-                Button(action: sendMessage) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                }
-                .buttonStyle(.plain)
-                .disabled(inputText.isEmpty || isLoading)
+            Picker("", selection: $selectedProvider) {
+                Text("Gemini API").tag("Gemini API")
+                Text("Ollama").tag("Ollama")
+                Text("Private Cloud").tag("Private Cloud")
+                Text("On-Device").tag("On-Device")
+                Text("ChatGPT").tag("ChatGPT")
             }
-            .padding(10)
-            .background(Color.black.opacity(0.1))
+            .labelsHidden()
+            .frame(width: 140)
+            .focusEffectDisabled()
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.28), .white.opacity(0.1)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .frame(width: 350, height: 500)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white.opacity(0.04))
+                .background(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(
+                    LinearGradient(
+                        colors: [.white.opacity(0.25), .white.opacity(0.1)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var messagesSection: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(chatManager.getCurrentMessages()) { message in
+                        MessageView(message: message, maxBubbleWidth: 300)
+                    }
+                    if isLoading {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                                .scaleEffect(0.6)
+                            Spacer()
+                        }
+                        .id("loading")
+                        .padding(.vertical, 8)
+                    }
+                }
+                .padding()
+                .padding(.bottom, 14)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(0.03))
+                    .background(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.22), .white.opacity(0.1)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing),
+                                lineWidth: 1)
+                    )
+            )
+            .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
+                if let lastId = chatManager.getCurrentMessages().last?.id {
+                    withAnimation {
+                        proxy.scrollTo(lastId, anchor: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
+    private var inputBar: some View {
+        HStack(alignment: .center, spacing: 12) {
+            TextField("Ask anything...", text: $inputText, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1...6)
+                .onSubmit(sendMessage)
+                .padding(.vertical, 10)
+
+            Button(action: sendMessage) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 26, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color.blue, Color.green],
+                            startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .shadow(color: Color.blue.opacity(0.25), radius: 6, x: 0, y: 3)
+            }
+            .buttonStyle(.plain)
+            .disabled(inputText.isEmpty || isLoading)
+            .opacity(inputText.isEmpty || isLoading ? 0.5 : 1.0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color.white.opacity(0.04))
+                .background(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(
+                    LinearGradient(
+                        colors: [.white.opacity(0.28), .white.opacity(0.12)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+        )
     }
 
     func sendMessage() {
