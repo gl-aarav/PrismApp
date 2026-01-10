@@ -28,158 +28,182 @@ struct QuickAIView: View {
     private let shortcutService = ShortcutService()
 
     var body: some View {
-        VStack(spacing: 0) {
-            if isExpanded {
-                // Header
-                HStack {
-                    Menu {
-                        Picker("Model", selection: $selectedProvider) {
-                            Section("API") {
-                                Text("Gemini API").tag("Gemini API")
-                                Text("Ollama").tag("Ollama")
+        ZStack {
+            VStack(spacing: 0) {
+                if isExpanded {
+                    VStack(spacing: 12) {
+                        // Header
+                        HStack {
+                            Menu {
+                                Picker("Model", selection: $selectedProvider) {
+                                    Section("API") {
+                                        Text("Gemini API").tag("Gemini API")
+                                        Text("Ollama").tag("Ollama")
+                                    }
+                                    Section("Shortcuts") {
+                                        Text("Private Cloud").tag("Private Cloud")
+                                        Text("On-Device").tag("On-Device")
+                                        Text("ChatGPT").tag("ChatGPT")
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: getProviderIcon(selectedProvider))
+                                        .foregroundStyle(
+                                            LinearGradient(
+                                                colors: [.blue, .green], startPoint: .topLeading,
+                                                endPoint: .bottomTrailing))
+                                    Text(selectedProvider)
+                                        .font(.headline)
+                                        .foregroundColor(.secondary)
+                                    Image(systemName: "chevron.down")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+
                             }
-                            Section("Shortcuts") {
-                                Text("Private Cloud").tag("Private Cloud")
-                                Text("On-Device").tag("On-Device")
-                                Text("ChatGPT").tag("ChatGPT")
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+
+                            Spacer()
+
+                            // New Chat
+                            Button(action: {
+                                chatManager.deleteAllSessions()
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                    isExpanded = false
+                                }
+                            }) {
+                                Image(systemName: "square.and.pencil")
+                                    .foregroundColor(.secondary)
                             }
+                            .buttonStyle(.plain)
+                            .help("New Chat")
                         }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: getProviderIcon(selectedProvider))
-                                .foregroundStyle(
-                                    LinearGradient(
-                                        colors: [.blue, .green], startPoint: .topLeading,
-                                        endPoint: .bottomTrailing))
-                            Text(selectedProvider)
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            Image(systemName: "chevron.down")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+
+                        // Messages
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 16) {
+                                    ForEach(chatManager.getCurrentMessages()) { message in
+                                        QuickAIMessageView(message: message)
+                                    }
+                                    if isLoading {
+                                        HStack {
+                                            TypingIndicator()
+                                            Spacer()
+                                        }
+                                        .padding(.horizontal)
+                                        .id("loading")
+                                    }
+                                }
+                                .padding(20)
+                            }
+                            .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
+                                if let lastId = chatManager.getCurrentMessages().last?.id {
+                                    withAnimation {
+                                        proxy.scrollTo(lastId, anchor: .bottom)
+                                    }
+                                }
+                            }
+                            .onChange(of: isLoading) { _, loading in
+                                if loading {
+                                    withAnimation {
+                                        proxy.scrollTo("loading", anchor: .bottom)
+                                    }
+                                }
+                            }
                         }
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .fill(Color.black.opacity(colorScheme == .dark ? 0.24 : 0.16))
+                            .background(
+                                .ultraThinMaterial.opacity(colorScheme == .dark ? 0.32 : 0.22))
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .padding(.bottom, 10)
+                }
 
-                    Spacer()
+                // Input Area
+                HStack(alignment: .center, spacing: 12) {
+                    TextField("Request...", text: $inputText, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 16))
+                        .lineLimit(1...6)
+                        .multilineTextAlignment(.leading)
+                        .focused($isFocused)
+                        .onSubmit { sendMessage() }
 
-                    // New Chat
-                    Button(action: {
-                        chatManager.deleteAllSessions()
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                            isExpanded = false
+                    // Thinking Level Selector
+                    if selectedProvider == "Ollama" || selectedProvider == "Gemini API" {
+                        Menu {
+                            Picker("Thinking Effort", selection: $thinkingLevel) {
+                                Text("Low").tag("low")
+                                Text("Medium").tag("medium")
+                                Text("High").tag("high")
+                            }
+                        } label: {
+                            Image(systemName: "brain")
+                                .font(.system(size: 16))
+                                .foregroundColor(
+                                    thinkingLevel == "medium" ? Color.teal : Color.green
+                                )
+                                .padding(6)
+                                .background(Color.white.opacity(0.10))
+                                .clipShape(Circle())
                         }
-                    }) {
-                        Image(systemName: "square.and.pencil")
-                            .foregroundColor(.secondary)
+                        .menuStyle(.borderlessButton)
+                        .help("Reasoning Effort")
+                    }
+
+                    Button(action: sendMessage) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 28))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(sendButtonStyle())
                     }
                     .buttonStyle(.plain)
-                    .help("New Chat")
+                    .disabled(inputText.isEmpty || isLoading)
                 }
-                .padding()
-                .background(.ultraThinMaterial)
-
-                // Messages
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 16) {
-                            ForEach(chatManager.getCurrentMessages()) { message in
-                                QuickAIMessageView(message: message)
-                            }
-                            if isLoading {
-                                HStack {
-                                    TypingIndicator()
-                                    Spacer()
-                                }
-                                .padding(.horizontal)
-                                .id("loading")
-                            }
-                        }
-                        .padding(20)
-                    }
-                    .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
-                        if let lastId = chatManager.getCurrentMessages().last?.id {
-                            withAnimation {
-                                proxy.scrollTo(lastId, anchor: .bottom)
-                            }
-                        }
-                    }
-                    .onChange(of: isLoading) { _, loading in
-                        if loading {
-                            withAnimation {
-                                proxy.scrollTo("loading", anchor: .bottom)
-                            }
-                        }
-                    }
-                }
-
-                Divider()
+                .padding(16)
+                .background(CommandBarBackground(cornerRadius: 26))
             }
-
-            // Input Area
-            HStack(alignment: .center, spacing: 12) {
-                TextField("Request...", text: $inputText, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 16))
-                    .lineLimit(1...6)
-                    .multilineTextAlignment(.leading)
-                    .focused($isFocused)
-                    .onSubmit { sendMessage() }
-
-                // Thinking Level Selector
-                if selectedProvider == "Ollama" || selectedProvider == "Gemini API" {
-                    Menu {
-                        Picker("Thinking Effort", selection: $thinkingLevel) {
-                            Text("Low").tag("low")
-                            Text("Medium").tag("medium")
-                            Text("High").tag("high")
-                        }
-                    } label: {
-                        Image(systemName: "brain")
-                            .font(.system(size: 16))
-                            .foregroundColor(thinkingLevel == "medium" ? .secondary : .blue)
-                            .padding(4)
-                            .background(Color.gray.opacity(0.1))
-                            .clipShape(Circle())
-                    }
-                    .menuStyle(.borderlessButton)
-                    .help("Reasoning Effort")
-                }
-
-                Button(action: sendMessage) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 28))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(
-                            inputText.isEmpty ? Color.gray.gradient : Color.blue.gradient)
-                }
-                .buttonStyle(.plain)
-                .disabled(inputText.isEmpty || isLoading)
-            }
-            .padding(16)
-            .background(.ultraThinMaterial)
         }
-        .background(
-            VisualEffectView(
-                material: colorScheme == .dark ? .hudWindow : .popover, blendingMode: .behindWindow)
-        )
-        .cornerRadius(26)
-        .overlay(
-            RoundedRectangle(cornerRadius: 26).stroke(
-                colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1),
-                lineWidth: 1)
-        )
         .onAppear {
             isFocused = true
             onResize?(CGSize(width: 700, height: 80))
         }
         .onChange(of: isExpanded) { _, expanded in
-            if expanded {
-                onResize?(CGSize(width: 700, height: 500))
-            } else {
-                onResize?(CGSize(width: 700, height: 80))
-            }
+            let targetSize =
+                expanded ? CGSize(width: 700, height: 520) : CGSize(width: 700, height: 86)
+            onResize?(targetSize)
+        }
+    }
+
+    private func sendButtonStyle() -> AnyShapeStyle {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let isNight = hour >= 19 || hour < 7
+        // In dark mode or at night, use a brighter punchy gradient for contrast
+        if colorScheme == .dark || isNight {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.95), Color.green.opacity(0.85)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        } else {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [Color.teal, Color.green],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
         }
     }
 
@@ -358,7 +382,11 @@ struct QuickAIMessageView: View {
                 Text(message.content)
                     .font(.system(size: 14))
                     .padding(12)
-                    .background(Color.blue.opacity(0.8))
+                    .background(
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.92), Color.cyan.opacity(0.7)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
                     .foregroundColor(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
@@ -397,7 +425,7 @@ struct QuickAIMessageView: View {
                 }
                 .padding(12)
                 .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                 Spacer()
             }
@@ -405,20 +433,37 @@ struct QuickAIMessageView: View {
     }
 }
 
-struct VisualEffectView: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-    let blendingMode: NSVisualEffectView.BlendingMode
+struct CommandBarBackground: View {
+    var cornerRadius: CGFloat = 26
+    @Environment(\.colorScheme) private var colorScheme
 
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let visualEffectView = NSVisualEffectView()
-        visualEffectView.material = material
-        visualEffectView.blendingMode = blendingMode
-        visualEffectView.state = .active
-        return visualEffectView
-    }
-
-    func updateNSView(_ visualEffectView: NSVisualEffectView, context: Context) {
-        visualEffectView.material = material
-        visualEffectView.blendingMode = blendingMode
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(
+                LinearGradient(
+                    stops: [
+                        .init(
+                            color: Color.blue.opacity(colorScheme == .dark ? 0.34 : 0.44),
+                            location: 0.0),
+                        .init(
+                            color: Color.green.opacity(colorScheme == .dark ? 0.30 : 0.38),
+                            location: 1.0),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        Color.white.opacity(colorScheme == .dark ? 0.35 : 0.28),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
     }
 }
