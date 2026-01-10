@@ -23,6 +23,13 @@ struct QuickAIView: View {
     @AppStorage("ShortcutOnDevice") private var shortcutOnDevice: String = "Ask AI Device"
     @AppStorage("ShortcutChatGPT") private var shortcutChatGPT: String = "Ask ChatGPT"
     @AppStorage("QuickAIBackgroundOpacity") private var backgroundOpacity: Double = 0.18
+    @AppStorage("QuickAICommandBarVibrancy") private var commandBarVibrancy: Double = 0.55
+    private var clampedBackgroundOpacity: Double {
+        min(max(backgroundOpacity, 0.05), 0.55)
+    }
+    private var clampedCommandBarVibrancy: Double {
+        min(max(commandBarVibrancy, 0.05), 0.9)
+    }
 
     private let geminiService = GeminiService()
     private let ollamaService = OllamaService()
@@ -173,6 +180,30 @@ struct QuickAIView: View {
                                     Text("Current: \(Int((backgroundOpacity) * 100))%")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+
+                                    Divider().padding(.vertical, 4)
+
+                                    Text("Chat Bar Vibrancy")
+                                        .font(.headline)
+                                    Slider(
+                                        value: Binding(
+                                            get: { commandBarVibrancy },
+                                            set: { commandBarVibrancy = min(max($0, 0.05), 0.9) }
+                                        ),
+                                        in: 0.05...0.9
+                                    )
+                                    HStack {
+                                        Text("Subtle")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        Text("Punchy")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text("Current: \(Int((commandBarVibrancy) * 100))%")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                                 .padding(16)
                                 .frame(width: 240)
@@ -219,22 +250,26 @@ struct QuickAIView: View {
                     .background(
                         RoundedRectangle(cornerRadius: 26, style: .continuous)
                             .fill(
-                                Color.black.opacity(
+                                (colorScheme == .dark ? Color.black : Color.white).opacity(
                                     colorScheme == .dark
-                                        ? min(max(backgroundOpacity, 0.05), 0.55) + 0.08
-                                        : min(max(backgroundOpacity, 0.05), 0.55)
+                                        ? clampedBackgroundOpacity + 0.08
+                                        : clampedBackgroundOpacity
                                 )
                             )
                             .background(
                                 .ultraThinMaterial.opacity(
                                     colorScheme == .dark
-                                        ? min(max(backgroundOpacity, 0.05), 0.55) + 0.16
-                                        : min(max(backgroundOpacity, 0.05), 0.55) + 0.08
+                                        ? clampedBackgroundOpacity + 0.16
+                                        : clampedBackgroundOpacity + 0.12
                                 )
                             )
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .compositingGroup()
                     .padding(.bottom, 10)
+                    .transition(
+                        .move(edge: .top).combined(with: .opacity)
+                    )
                 }
 
                 // Input Area
@@ -250,11 +285,9 @@ struct QuickAIView: View {
                     // Thinking Level Selector
                     if selectedProvider == "Ollama" || selectedProvider == "Gemini API" {
                         Menu {
-                            Picker("Thinking Effort", selection: $thinkingLevel) {
-                                Text("Low").tag("low")
-                                Text("Medium").tag("medium")
-                                Text("High").tag("high")
-                            }
+                            thinkingOption(title: "Low", value: "low")
+                            thinkingOption(title: "Medium", value: "medium")
+                            thinkingOption(title: "High", value: "high")
                         } label: {
                             Image(systemName: "brain")
                                 .font(.system(size: 16))
@@ -292,7 +325,9 @@ struct QuickAIView: View {
         .onChange(of: isExpanded) { _, expanded in
             let targetSize =
                 expanded ? CGSize(width: 700, height: 520) : CGSize(width: 700, height: 86)
-            onResize?(targetSize)
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.92, blendDuration: 0.08)) {
+                onResize?(targetSize)
+            }
         }
     }
 
@@ -490,6 +525,22 @@ struct QuickAIView: View {
     }
 }
 
+extension QuickAIView {
+    @ViewBuilder
+    private func thinkingOption(title: String, value: String) -> some View {
+        Button(action: { thinkingLevel = value }) {
+            HStack {
+                Text(title)
+                Spacer()
+                if thinkingLevel == value {
+                    Image(systemName: "checkmark")
+                        .foregroundColor(.accentColor)
+                }
+            }
+        }
+    }
+}
+
 struct QuickAIMessageView: View {
     let message: Message
 
@@ -554,35 +605,36 @@ struct QuickAIMessageView: View {
 struct CommandBarBackground: View {
     var cornerRadius: CGFloat = 26
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("QuickAICommandBarVibrancy") private var commandBarVibrancy: Double = 0.55
 
     var body: some View {
-        Capsule(style: .continuous)
-            .fill(
-                LinearGradient(
-                    stops: [
-                        .init(
-                            color: Color.blue.opacity(colorScheme == .dark ? 0.34 : 0.44),
-                            location: 0.0),
-                        .init(
-                            color: Color.green.opacity(colorScheme == .dark ? 0.30 : 0.38),
-                            location: 1.0),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+        let gradient = LinearGradient(
+            stops: [
+                .init(
+                    color: Color.blue.opacity(colorScheme == .dark ? 0.34 : 0.44),
+                    location: 0.0),
+                .init(
+                    color: Color.green.opacity(colorScheme == .dark ? 0.30 : 0.38),
+                    location: 1.0),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+
+        return ZStack {
+            Capsule(style: .continuous)
+                .fill(.ultraThinMaterial.opacity(min(max(commandBarVibrancy, 0.05), 0.9)))
+            Capsule(style: .continuous)
+                .fill(gradient)
+            Capsule(style: .continuous)
+                .stroke(
+                    colorScheme == .dark
+                        ? Color.black.opacity(0.35)
+                        : Color.white.opacity(0.28),
+                    lineWidth: 1
                 )
-            )
-            .background(
-                Capsule(style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(
-                        Color.white.opacity(colorScheme == .dark ? 0.35 : 0.28),
-                        lineWidth: 1
-                    )
-            )
-            .compositingGroup()
-            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
+        }
+        .drawingGroup()
+        .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
     }
 }

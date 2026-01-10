@@ -2859,6 +2859,8 @@ struct SettingsView: View {
     @AppStorage("SystemPrompt") private var systemPrompt: String = ""
     @AppStorage("ShowMenuBar") private var showMenuBar = true
     @AppStorage("EnableQuickAI") private var enableQuickAI = true
+    @AppStorage("QuickAIBackgroundOpacity") private var quickAIBackgroundOpacity: Double = 0.18
+    @AppStorage("QuickAICommandBarVibrancy") private var quickAICommandBarVibrancy: Double = 0.55
     @EnvironmentObject var chatManager: ChatManager
 
     let ollamaModels = [
@@ -2893,6 +2895,50 @@ struct SettingsView: View {
                     .toggleStyle(.switch)
                 Toggle("Enable Quick AI Hotkey", isOn: $enableQuickAI)
                     .toggleStyle(.switch)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Quick AI Background Opacity")
+                        Spacer()
+                        Text("\(Int(min(max(quickAIBackgroundOpacity, 0.05), 0.55) * 100))%")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { quickAIBackgroundOpacity },
+                            set: { quickAIBackgroundOpacity = min(max($0, 0.05), 0.55) }
+                        ),
+                        in: 0.05...0.55
+                    )
+                    HStack {
+                        Text("Clear").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("Opaque").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Quick AI Chat Bar Vibrancy")
+                        Spacer()
+                        Text(
+                            "\(Int(min(max(quickAICommandBarVibrancy, 0.05), 0.9) * 100))%"
+                        )
+                        .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { quickAICommandBarVibrancy },
+                            set: { quickAICommandBarVibrancy = min(max($0, 0.05), 0.9) }
+                        ),
+                        in: 0.05...0.9
+                    )
+                    HStack {
+                        Text("Subtle").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("Punchy").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
 
                 HStack {
                     Text("Background Image")

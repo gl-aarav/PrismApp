@@ -37,6 +37,10 @@ struct PrismApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var appearanceObservation: NSKeyValueObservation?
+    private var lightIcon: NSImage?
+    private var darkIcon: NSImage?
+
     override init() {
         super.init()
         UserDefaults.standard.register(defaults: ["ShowMenuBar": true, "EnableQuickAI": true])
@@ -69,7 +73,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         HotKeyManager.shared.register()
 
+        loadIcons()
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) {
+            [weak self] app, _ in
+            self?.updateAppIcon(for: app.effectiveAppearance)
+        }
+
         print("Prism has launched!")
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        appearanceObservation = nil
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -109,5 +123,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return true
+    }
+
+    private func loadIcons() {
+        lightIcon = loadIcon(named: "AppIconLight") ?? loadIcon(named: "AppIcon")
+        darkIcon = loadIcon(named: "AppIconDark") ?? lightIcon
+    }
+
+    private func loadIcon(named: String) -> NSImage? {
+        guard let url = Bundle.main.url(forResource: named, withExtension: "png") else {
+            return nil
+        }
+        return NSImage(contentsOf: url)
+    }
+
+    private func updateAppIcon(for appearance: NSAppearance) {
+        let match = appearance.bestMatch(from: [.darkAqua, .aqua])
+        if match == .darkAqua {
+            if let icon = darkIcon {
+                NSApp.applicationIconImage = icon
+                return
+            }
+        }
+        if let icon = lightIcon {
+            NSApp.applicationIconImage = icon
+        }
     }
 }
