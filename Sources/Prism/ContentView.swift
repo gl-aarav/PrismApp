@@ -410,7 +410,7 @@ class ChatManager: ObservableObject {
         }
 
         let newSession = ChatSession(title: "New Chat", messages: [])
-        sessions.insert(newSession, at: 0)
+        sessions.append(newSession)
         currentSessionId = newSession.id
         saveSessions()
     }
@@ -1426,34 +1426,168 @@ struct SidebarView: View {
     @ObservedObject var chatManager: ChatManager
 
     var body: some View {
-        List(selection: $chatManager.currentSessionId) {
-            ForEach(chatManager.sessions) { session in
-                Text(session.title)
-                    .tag(session.id)
-                    .contextMenu {
-                        if !session.messages.isEmpty {
-                            Button("Export Chat") {
-                                exportChat(session)
-                            }
-                            Divider()
-                            Button("Delete") {
-                                chatManager.deleteSession(id: session.id)
-                            }
-                        }
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        if !session.messages.isEmpty {
-                            Button(role: .destructive) {
-                                chatManager.deleteSession(id: session.id)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                    }
+        VStack(spacing: 12) {
+            HStack {
+                Text("Chats")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Button(action: chatManager.createNewSession) {
+                    Label("New", systemImage: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(.ultraThinMaterial)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(0.35),
+                                            Color.white.opacity(0.12),
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1
+                                )
+                        )
+                        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    chatManager.deleteAllSessions()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(8)
+                        .background(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help("Clear all chats")
+            }
+            .padding(.horizontal)
+            .padding(.top, 10)
+
+            List(selection: $chatManager.currentSessionId) {
+                ForEach(chatManager.sessions) { session in
+                    sidebarRow(for: session)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .listStyle(.plain)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
+            )
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func sidebarRow(for session: ChatSession) -> some View {
+        let isSelected = chatManager.currentSessionId == session.id
+        HStack(spacing: 10) {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.blue.opacity(0.65), Color.green.opacity(0.55)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 8, height: 8)
+                .opacity(isSelected ? 1 : 0.35)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.title.isEmpty ? "Untitled" : session.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                Text(session.date, style: .date)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+
+            if !session.messages.isEmpty {
+                Text("\(session.messages.count)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.secondary.opacity(0.12))
+                    .clipShape(Capsule())
             }
         }
-        .listStyle(.sidebar)
-        .navigationTitle("Chats")
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            Group {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.blue.opacity(0.24),
+                                    Color.green.opacity(0.22),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
+                } else {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.white.opacity(0.04))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+                        )
+                        .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 3)
+                }
+            }
+        )
+        .contentShape(Rectangle())
+        .tag(session.id)
+        .contextMenu {
+            if !session.messages.isEmpty {
+                Button("Export Chat") {
+                    exportChat(session)
+                }
+                Divider()
+                Button("Delete") {
+                    chatManager.deleteSession(id: session.id)
+                }
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if !session.messages.isEmpty {
+                Button(role: .destructive) {
+                    chatManager.deleteSession(id: session.id)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
     }
 
     func exportChat(_ session: ChatSession) {
@@ -1515,11 +1649,28 @@ struct HeaderView: View {
                         Text("New Chat")
                     }
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(20)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.28),
+                                        Color.white.opacity(0.10),
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+                    .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
                 }
                 .buttonStyle(.plain)
 
