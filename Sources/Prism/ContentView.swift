@@ -1478,16 +1478,14 @@ struct SidebarView: View {
             .padding(.horizontal)
             .padding(.top, 10)
 
-            List(selection: $chatManager.currentSessionId) {
-                ForEach(chatManager.sessions) { session in
-                    sidebarRow(for: session)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(chatManager.sessions) { session in
+                        sidebarRow(for: session)
+                    }
                 }
+                .padding(10)
             }
-            .scrollContentBackground(.hidden)
-            .listStyle(.plain)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(.ultraThinMaterial)
@@ -1567,7 +1565,9 @@ struct SidebarView: View {
             }
         )
         .contentShape(Rectangle())
-        .tag(session.id)
+        .onTapGesture {
+            chatManager.currentSessionId = session.id
+        }
         .contextMenu {
             if !session.messages.isEmpty {
                 Button("Export Chat") {
@@ -1576,15 +1576,6 @@ struct SidebarView: View {
                 Divider()
                 Button("Delete") {
                     chatManager.deleteSession(id: session.id)
-                }
-            }
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            if !session.messages.isEmpty {
-                Button(role: .destructive) {
-                    chatManager.deleteSession(id: session.id)
-                } label: {
-                    Label("Delete", systemImage: "trash")
                 }
             }
         }
