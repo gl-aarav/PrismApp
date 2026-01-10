@@ -350,8 +350,8 @@ struct QuickAIView: View {
             return AnyShapeStyle(
                 LinearGradient(
                     colors: [
-                        Color.teal.opacity(darkened ? 0.95 : 1.0),
-                        Color.green.opacity(darkened ? 0.95 : 1.0),
+                        Color.black.opacity(darkened ? 0.85 : 0.9),
+                        Color.black.opacity(darkened ? 0.75 : 0.8),
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
