@@ -131,10 +131,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func loadIcon(named: String) -> NSImage? {
-        guard let url = Bundle.main.url(forResource: named, withExtension: "png") else {
-            return nil
-        }
-        return NSImage(contentsOf: url)
+        guard let url = Bundle.main.url(forResource: named, withExtension: "png"),
+            let base = NSImage(contentsOf: url)
+        else { return nil }
+        return roundedIcon(from: base)
+    }
+
+    private func roundedIcon(from image: NSImage) -> NSImage {
+        let size = image.size
+        // Slightly inset and round more to match native macOS icon silhouette
+        let inset = min(size.width, size.height) * 0.095  // slightly larger glyph (~1px more)
+        let imageRect = NSRect(origin: .zero, size: size).insetBy(dx: inset, dy: inset)
+        let radius = min(imageRect.width, imageRect.height) * 0.22
+
+        let newImage = NSImage(size: size)
+        newImage.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+
+        // Shadow backdrop to mimic native icon lift
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = min(size.width, size.height) * 0.11
+        shadow.shadowOffset = NSSize(width: 0, height: -size.height * 0.018)
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow.set()
+
+        let shadowPath = NSBezierPath(roundedRect: imageRect, xRadius: radius, yRadius: radius)
+        NSColor.black.withAlphaComponent(0.55).setFill()
+        shadowPath.fill()
+
+        // Clear shadow for subsequent drawing
+        NSShadow().set()
+
+        // Clip to rounded rect and draw scaled image
+        shadowPath.addClip()
+        image.draw(in: imageRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+
+        newImage.unlockFocus()
+        newImage.isTemplate = false
+        return newImage
     }
 
     private func updateAppIcon(for appearance: NSAppearance) {
