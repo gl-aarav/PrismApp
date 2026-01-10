@@ -3145,24 +3145,7 @@ struct QuickChatView: View {
 
     private var headerBar: some View {
         HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [primaryColor, primaryColor.opacity(0.8)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing)
-                    )
-                    .frame(width: 34, height: 34)
-                    .shadow(color: primaryColor.opacity(0.35), radius: 6, x: 0, y: 4)
-
-                Image(systemName: "triangle.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.white)
-                    .rotationEffect(.degrees(180))
-            }
-            .padding(.leading, 4)
-
-            Spacer()
+            Spacer(minLength: 0)
 
             Button(action: {
                 chatManager.deleteAllSessions()  // For Quick Chat, we just clear everything
@@ -3179,6 +3162,7 @@ struct QuickChatView: View {
                     .foregroundColor(.primary)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
+            .focusable(false)
             .buttonStyle(.plain)
             .help("New Chat")
 
@@ -3192,6 +3176,7 @@ struct QuickChatView: View {
             .labelsHidden()
             .frame(width: 140)
             .focusEffectDisabled()
+            .focusable(false)
             .padding(.vertical, 6)
             .padding(.horizontal, 10)
             .background(.ultraThinMaterial)
