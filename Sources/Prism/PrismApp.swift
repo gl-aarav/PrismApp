@@ -29,7 +29,7 @@ struct PrismApp: App {
             }
         }
 
-        MenuBarExtra("Prism", systemImage: "triangle", isInserted: $showMenuBar) {
+        MenuBarExtra("", systemImage: "triangle", isInserted: $showMenuBar) {
             QuickChatView()
         }
         .menuBarExtraStyle(.window)

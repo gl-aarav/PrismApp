@@ -3101,6 +3101,7 @@ struct QuickChatView: View {
     @AppStorage("ShortcutPrivateCloud") private var shortcutPrivateCloud: String = "Ask AI Private"
     @AppStorage("ShortcutOnDevice") private var shortcutOnDevice: String = "Ask AI Device"
     @AppStorage("ShortcutChatGPT") private var shortcutChatGPT: String = "Ask ChatGPT"
+    @AppStorage("BackgroundImagePath") private var backgroundImagePath: String = ""
 
     private let geminiService = GeminiService()
     private let ollamaService = OllamaService()
@@ -3110,8 +3111,9 @@ struct QuickChatView: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color.blue.opacity(0.35), Color.green.opacity(0.25),
-                    Color.black.opacity(0.15),
+                    primaryColor.opacity(0.42),
+                    primaryColor.opacity(0.26),
+                    secondaryColor.opacity(0.18),
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -3148,11 +3150,11 @@ struct QuickChatView: View {
                     Circle()
                         .fill(
                             LinearGradient(
-                                colors: [.cyan.opacity(0.9), .blue, .green.opacity(0.9)],
+                                colors: [primaryColor, primaryColor.opacity(0.8)],
                                 startPoint: .topLeading, endPoint: .bottomTrailing)
                         )
                         .frame(width: 32, height: 32)
-                        .shadow(color: Color.blue.opacity(0.35), radius: 6, x: 0, y: 4)
+                        .shadow(color: primaryColor.opacity(0.35), radius: 6, x: 0, y: 4)
 
                     Image(systemName: "triangle.fill")
                         .font(.system(size: 14, weight: .bold))
@@ -3191,7 +3193,7 @@ struct QuickChatView: View {
                     .padding(8)
                     .background(
                         LinearGradient(
-                            colors: [Color.blue.opacity(0.2), Color.green.opacity(0.2)],
+                            colors: [primaryColor.opacity(0.22), secondaryColor.opacity(0.2)],
                             startPoint: .topLeading, endPoint: .bottomTrailing)
                     )
                     .foregroundColor(.primary)
@@ -3296,10 +3298,10 @@ struct QuickChatView: View {
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [Color.blue, Color.green],
+                            colors: [primaryColor, secondaryColor.opacity(0.9)],
                             startPoint: .topLeading, endPoint: .bottomTrailing)
                     )
-                    .shadow(color: Color.blue.opacity(0.25), radius: 6, x: 0, y: 3)
+                    .shadow(color: primaryColor.opacity(0.25), radius: 6, x: 0, y: 3)
             }
             .buttonStyle(.plain)
             .disabled(inputText.isEmpty || isLoading)
@@ -3318,6 +3320,46 @@ struct QuickChatView: View {
                     LinearGradient(
                         colors: [.white.opacity(0.28), .white.opacity(0.12)],
                         startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+        )
+    }
+
+    private var primaryColor: Color {
+        if let color = derivePrimaryColor(from: backgroundImagePath) {
+            return color
+        }
+        return Color.accentColor
+    }
+
+    private var secondaryColor: Color {
+        Color(nsColor: .windowBackgroundColor)
+    }
+
+    private func derivePrimaryColor(from path: String) -> Color? {
+        guard !path.isEmpty, let image = NSImage(contentsOfFile: path) else { return nil }
+        guard let tiff = image.tiffRepresentation,
+            let bitmap = NSBitmapImageRep(data: tiff)
+        else { return nil }
+
+        let width = max(1, min(40, bitmap.pixelsWide))
+        let height = max(1, min(40, bitmap.pixelsHigh))
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+
+        for x in 0..<width {
+            for y in 0..<height {
+                let color = bitmap.colorAt(x: x, y: y) ?? .clear
+                red += color.redComponent
+                green += color.greenComponent
+                blue += color.blueComponent
+            }
+        }
+
+        let count = CGFloat(width * height)
+        return Color(
+            red: red / count,
+            green: green / count,
+            blue: blue / count
         )
     }
 
