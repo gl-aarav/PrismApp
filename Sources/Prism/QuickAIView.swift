@@ -22,10 +22,12 @@ struct QuickAIView: View {
     @AppStorage("ShortcutPrivateCloud") private var shortcutPrivateCloud: String = "Ask AI Private"
     @AppStorage("ShortcutOnDevice") private var shortcutOnDevice: String = "Ask AI Device"
     @AppStorage("ShortcutChatGPT") private var shortcutChatGPT: String = "Ask ChatGPT"
+    @AppStorage("QuickAIBackgroundOpacity") private var backgroundOpacity: Double = 0.18
 
     private let geminiService = GeminiService()
     private let ollamaService = OllamaService()
     private let shortcutService = ShortcutService()
+    @State private var showOpacityPopover: Bool = false
 
     var body: some View {
         ZStack {
@@ -124,6 +126,57 @@ struct QuickAIView: View {
                             }
                             .buttonStyle(.plain)
                             .help("New Chat")
+
+                            // Opacity control
+                            Button(action: { showOpacityPopover.toggle() }) {
+                                Image(systemName: "paintbrush.pointed")
+                                    .foregroundColor(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        Capsule(style: .continuous)
+                                            .fill(
+                                                Color.gray.opacity(
+                                                    colorScheme == .dark ? 0.18 : 0.14)
+                                            )
+                                            .overlay(
+                                                Capsule(style: .continuous)
+                                                    .stroke(
+                                                        Color.white.opacity(
+                                                            colorScheme == .dark ? 0.22 : 0.18),
+                                                        lineWidth: 0.8
+                                                    )
+                                            )
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .popover(isPresented: $showOpacityPopover, arrowEdge: .top) {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Background Opacity")
+                                        .font(.headline)
+                                    Slider(
+                                        value: Binding(
+                                            get: { backgroundOpacity },
+                                            set: { backgroundOpacity = min(max($0, 0.05), 0.55) }
+                                        ),
+                                        in: 0.05...0.55
+                                    )
+                                    HStack {
+                                        Text("Clear")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        Text("Opaque")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text("Current: \(Int((backgroundOpacity) * 100))%")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(16)
+                                .frame(width: 240)
+                            }
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
@@ -165,9 +218,20 @@ struct QuickAIView: View {
                     .padding(10)
                     .background(
                         RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .fill(Color.black.opacity(colorScheme == .dark ? 0.24 : 0.16))
+                            .fill(
+                                Color.black.opacity(
+                                    colorScheme == .dark
+                                        ? min(max(backgroundOpacity, 0.05), 0.55) + 0.08
+                                        : min(max(backgroundOpacity, 0.05), 0.55)
+                                )
+                            )
                             .background(
-                                .ultraThinMaterial.opacity(colorScheme == .dark ? 0.32 : 0.22))
+                                .ultraThinMaterial.opacity(
+                                    colorScheme == .dark
+                                        ? min(max(backgroundOpacity, 0.05), 0.55) + 0.16
+                                        : min(max(backgroundOpacity, 0.05), 0.55) + 0.08
+                                )
+                            )
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
                     .padding(.bottom, 10)
@@ -208,8 +272,11 @@ struct QuickAIView: View {
                     Button(action: sendMessage) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 28))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(sendButtonStyle())
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(
+                                sendButtonStyle(darkened: true),
+                                Color.black.opacity(colorScheme == .dark ? 0.35 : 0.28)
+                            )
                     }
                     .buttonStyle(.plain)
                     .disabled(inputText.isEmpty || isLoading)
@@ -229,14 +296,17 @@ struct QuickAIView: View {
         }
     }
 
-    private func sendButtonStyle() -> AnyShapeStyle {
+    private func sendButtonStyle(darkened: Bool = false) -> AnyShapeStyle {
         let hour = Calendar.current.component(.hour, from: Date())
         let isNight = hour >= 19 || hour < 7
         // In dark mode or at night, use a brighter punchy gradient for contrast
         if colorScheme == .dark || isNight {
             return AnyShapeStyle(
                 LinearGradient(
-                    colors: [Color.white.opacity(0.95), Color.green.opacity(0.85)],
+                    colors: [
+                        Color.white.opacity(darkened ? 0.9 : 0.95),
+                        Color.green.opacity(darkened ? 0.9 : 0.85),
+                    ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -244,7 +314,10 @@ struct QuickAIView: View {
         } else {
             return AnyShapeStyle(
                 LinearGradient(
-                    colors: [Color.teal, Color.green],
+                    colors: [
+                        Color.teal.opacity(darkened ? 0.95 : 1.0),
+                        Color.green.opacity(darkened ? 0.95 : 1.0),
+                    ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
