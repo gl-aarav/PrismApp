@@ -35,19 +35,32 @@ struct QuickAIView: View {
                         // Header
                         HStack {
                             Menu {
-                                Picker("Model", selection: $selectedProvider) {
-                                    Section("API") {
-                                        Text("Gemini API").tag("Gemini API")
-                                        Text("Ollama").tag("Ollama")
+                                Section("API") {
+                                    Button(action: { selectedProvider = "Gemini API" }) {
+                                        Label(
+                                            "Gemini API", systemImage: getProviderIcon("Gemini API")
+                                        )
                                     }
-                                    Section("Shortcuts") {
-                                        Text("Private Cloud").tag("Private Cloud")
-                                        Text("On-Device").tag("On-Device")
-                                        Text("ChatGPT").tag("ChatGPT")
+                                    Button(action: { selectedProvider = "Ollama" }) {
+                                        Label("Ollama", systemImage: getProviderIcon("Ollama"))
+                                    }
+                                }
+                                Section("Shortcuts") {
+                                    Button(action: { selectedProvider = "Private Cloud" }) {
+                                        Label(
+                                            "Private Cloud",
+                                            systemImage: getProviderIcon("Private Cloud"))
+                                    }
+                                    Button(action: { selectedProvider = "On-Device" }) {
+                                        Label(
+                                            "On-Device", systemImage: getProviderIcon("On-Device"))
+                                    }
+                                    Button(action: { selectedProvider = "ChatGPT" }) {
+                                        Label("ChatGPT", systemImage: getProviderIcon("ChatGPT"))
                                     }
                                 }
                             } label: {
-                                HStack(spacing: 4) {
+                                HStack(spacing: 6) {
                                     Image(systemName: getProviderIcon(selectedProvider))
                                         .foregroundStyle(
                                             LinearGradient(
@@ -60,7 +73,22 @@ struct QuickAIView: View {
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                 }
-
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(
+                                            Color.gray.opacity(colorScheme == .dark ? 0.18 : 0.14)
+                                        )
+                                        .overlay(
+                                            Capsule(style: .continuous)
+                                                .stroke(
+                                                    Color.white.opacity(
+                                                        colorScheme == .dark ? 0.22 : 0.18),
+                                                    lineWidth: 0.8
+                                                )
+                                        )
+                                )
                             }
                             .menuStyle(.borderlessButton)
                             .fixedSize()
@@ -76,6 +104,23 @@ struct QuickAIView: View {
                             }) {
                                 Image(systemName: "square.and.pencil")
                                     .foregroundColor(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        Capsule(style: .continuous)
+                                            .fill(
+                                                Color.gray.opacity(
+                                                    colorScheme == .dark ? 0.18 : 0.14)
+                                            )
+                                            .overlay(
+                                                Capsule(style: .continuous)
+                                                    .stroke(
+                                                        Color.white.opacity(
+                                                            colorScheme == .dark ? 0.22 : 0.18),
+                                                        lineWidth: 0.8
+                                                    )
+                                            )
+                                    )
                             }
                             .buttonStyle(.plain)
                             .help("New Chat")
@@ -438,7 +483,7 @@ struct CommandBarBackground: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        Capsule(style: .continuous)
             .fill(
                 LinearGradient(
                     stops: [
@@ -454,16 +499,17 @@ struct CommandBarBackground: View {
                 )
             )
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                Capsule(style: .continuous)
                     .fill(.ultraThinMaterial)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                Capsule(style: .continuous)
                     .stroke(
                         Color.white.opacity(colorScheme == .dark ? 0.35 : 0.28),
                         lineWidth: 1
                     )
             )
+            .compositingGroup()
             .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
     }
 }
