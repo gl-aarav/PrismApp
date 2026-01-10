@@ -636,5 +636,7 @@ struct CommandBarBackground: View {
         }
         .drawingGroup()
         .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
+        // Mask shadow and contents to capsule to prevent faint corner artifacts
+        .mask(Capsule(style: .continuous))
     }
 }
