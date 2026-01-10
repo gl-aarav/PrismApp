@@ -3145,42 +3145,22 @@ struct QuickChatView: View {
 
     private var headerBar: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [primaryColor, primaryColor.opacity(0.8)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing)
-                        )
-                        .frame(width: 32, height: 32)
-                        .shadow(color: primaryColor.opacity(0.35), radius: 6, x: 0, y: 4)
-
-                    Image(systemName: "triangle.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.white)
-                        .rotationEffect(.degrees(180))
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Prism Mini")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("Menu Bar")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(
+            ZStack {
+                Circle()
+                    .fill(
                         LinearGradient(
-                            colors: [.white.opacity(0.35), .white.opacity(0.15)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            colors: [primaryColor, primaryColor.opacity(0.8)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .frame(width: 34, height: 34)
+                    .shadow(color: primaryColor.opacity(0.35), radius: 6, x: 0, y: 4)
+
+                Image(systemName: "triangle.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+                    .rotationEffect(.degrees(180))
+            }
+            .padding(.leading, 4)
 
             Spacer()
 
