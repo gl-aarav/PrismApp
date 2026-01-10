@@ -3145,8 +3145,6 @@ struct QuickChatView: View {
 
     private var headerBar: some View {
         HStack(spacing: 10) {
-            Spacer(minLength: 0)
-
             Button(action: {
                 chatManager.deleteAllSessions()  // For Quick Chat, we just clear everything
             }) {
@@ -3188,6 +3186,8 @@ struct QuickChatView: View {
                             startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            Spacer(minLength: 0)
         }
         .padding(10)
         .background(
