@@ -172,8 +172,10 @@ class QuickAIManager: ObservableObject {
                 height: targetSize)
 
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0
-                panel.setFrame(newFrame, display: false)
+                // "Smooth like butter": Use a duration and an ease-out curve to animate the frame change.
+                context.duration = 0.35
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().setFrame(newFrame, display: true)
             }
 
             self.isApplyingResize = false
