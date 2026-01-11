@@ -93,7 +93,7 @@ class QuickAIManager: ObservableObject {
             }
 
             // Switch to accessory mode if no other windows are visible to avoid Dock/Menu bar activation
-            
+
             if let screen = NSScreen.main {
                 let screenRect = screen.visibleFrame
                 let panelSize = panel.frame.size
