@@ -140,8 +140,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func refreshAppIcon() {
-        let appearance = NSApp.effectiveAppearance
-        updateAppIcon(for: appearance)
+        // Dispatch async to allow activation policy changes to settle before updating the dock icon
+        DispatchQueue.main.async { [weak self] in
+            let appearance = NSApp.effectiveAppearance
+            self?.updateAppIcon(for: appearance)
+        }
     }
 
     private func roundedIcon(from image: NSImage) -> NSImage {
@@ -179,13 +182,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateAppIcon(for appearance: NSAppearance) {
+        // Fallback to checking system preference directly
+        let isSystemDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
         let match = appearance.bestMatch(from: [.darkAqua, .aqua])
-        if match == .darkAqua {
+
+        if isSystemDark || match == .darkAqua {
             if let icon = darkIcon {
                 NSApp.applicationIconImage = icon
                 return
             }
         }
+
+        // Only set light icon if we are NOT in dark mode
         if let icon = lightIcon {
             NSApp.applicationIconImage = icon
         }
