@@ -1979,9 +1979,11 @@ struct ThumbnailView: View {
     }
 }
 
+private let latexScaleFactor: CGFloat = 2.0 / 3.0  // ~1.5x smaller rendering
+
 struct MathView: NSViewRepresentable {
     var equation: String
-    var fontSize: CGFloat = 20
+    var fontSize: CGFloat = 20 * latexScaleFactor
 
     func makeNSView(context: Context) -> MTMathUILabel {
         let view = MTMathUILabel()
@@ -2101,15 +2103,19 @@ struct MathBlockView: View {
     @State private var height: CGFloat = 60
     @State private var didRender = false
 
+    private var scaledFontSize: CGFloat { 14 * latexScaleFactor }
+
     var body: some View {
         VStack {
-            KaTeXView(latex: equation, fontSize: 14, height: $height, didRender: $didRender)
-                .frame(height: height)
-                .frame(maxWidth: .infinity)
-                .opacity(didRender ? 1 : 0)
+            KaTeXView(
+                latex: equation, fontSize: scaledFontSize, height: $height, didRender: $didRender
+            )
+            .frame(height: height)
+            .frame(maxWidth: .infinity)
+            .opacity(didRender ? 1 : 0)
 
             if !didRender {
-                MathView(equation: equation, fontSize: 14)
+                MathView(equation: equation, fontSize: scaledFontSize)
                     .frame(minHeight: 30)
                     .padding(.vertical, 4)
             }
@@ -2496,7 +2502,7 @@ struct MarkdownView: View, Equatable {
         }
 
         // Display math: render image
-        let fontSize: CGFloat = 16
+        let fontSize: CGFloat = 16 * latexScaleFactor
         let mathImage = MTMathImage(
             latex: cleanLatex, fontSize: fontSize, textColor: .textColor, labelMode: .display)
         let (_, image) = mathImage.asImage()

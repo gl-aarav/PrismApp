@@ -5,6 +5,10 @@ class QuickAIManager: ObservableObject {
     static let shared = QuickAIManager()
     var panel: QuickAIPanel?
     private var previousApp: NSRunningApplication?
+    private var resizeWorkItem: DispatchWorkItem?
+    private var pendingResize: CGSize?
+    private var isApplyingResize = false
+    private let debounceInterval: TimeInterval = 0.18
 
     private init() {}
 
@@ -24,31 +28,14 @@ class QuickAIManager: ObservableObject {
         panel.isMovableByWindowBackground = true
 
         let rootView = QuickAIView(
-            onResize: { [weak panel] size in
-                guard let panel = panel else { return }
-                DispatchQueue.main.async {
-                    let currentFrame = panel.frame
-                    if currentFrame.size != size {
-                        let newY = currentFrame.maxY - size.height
-                        let newFrame = NSRect(
-                            x: currentFrame.minX, y: newY,
-                            width: size.width,
-                            height: size.height)
-
-                        NSAnimationContext.runAnimationGroup { context in
-                            context.duration = 0.5
-                            // Liquid/Bouncy effect: Overshoots target then settles
-                            // This creates the "expands extra" and "contracts extra" behavior
-                            context.timingFunction = CAMediaTimingFunction(
-                                controlPoints: 0.2, 1.25, 0.4, 1.0)
-                            panel.animator().setFrame(newFrame, display: true)
-                        }
-                    }
-                }
+            onResize: { [weak self, weak panel] size in
+                guard let self = self, let panel = panel else { return }
+                self.scheduleResize(to: size, panel: panel)
             },
             onClose: { [weak panel] in
                 panel?.orderOut(nil)
                 NSApp.setActivationPolicy(.regular)
+                AppDelegate.shared?.refreshAppIcon()
 
                 // If no other windows are visible, hide the app to return focus to previous app
                 let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
@@ -62,8 +49,22 @@ class QuickAIManager: ObservableObject {
                 }
             }
         )
+        // Ensure SwiftUI view covers the edges
+        .edgesIgnoringSafeArea(.all)
 
-        panel.contentView = NSHostingView(rootView: rootView)
+        // Use a container NSView to isolate SwiftUI hosting from the NSPanel's direct content view logic.
+        // This decouples the layout engine and prevents auto-resizing crashes (SIGABRT in _postWindowNeedsUpdateConstraints)
+        // caused by NSHostingView or NSHostingController fighting with the manual setFrame calls.
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 700, height: 80))
+        containerView.autoresizingMask = [.width, .height]
+
+        let hostingView = NSHostingView(rootView: rootView)
+        hostingView.frame = containerView.bounds
+        hostingView.autoresizingMask = [.width, .height]  // Ensure it resizes with the container
+        containerView.addSubview(hostingView)
+
+        panel.contentView = containerView
+        // We do NOT use contentViewController to avoid interfering with the window frame.
         self.panel = panel
     }
 
@@ -73,6 +74,7 @@ class QuickAIManager: ObservableObject {
         if panel.isVisible && panel.isKeyWindow {
             panel.orderOut(nil)
             NSApp.setActivationPolicy(.regular)
+            AppDelegate.shared?.refreshAppIcon()
 
             // If no other windows are visible, hide the app to return focus to previous app
             let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
@@ -100,6 +102,7 @@ class QuickAIManager: ObservableObject {
             let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
             if !otherWindowsVisible {
                 NSApp.setActivationPolicy(.accessory)
+                AppDelegate.shared?.refreshAppIcon()
             }
 
             if let screen = NSScreen.main {
@@ -114,6 +117,72 @@ class QuickAIManager: ObservableObject {
 
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    private func scheduleResize(to size: CGSize, panel: QuickAIPanel) {
+        pendingResize = size
+        resizeWorkItem?.cancel()
+
+        // Trailing debounce: coalesce rapid changes and apply only after
+        // the UI has been quiet for a short interval to avoid constraint churn.
+        let workItem = DispatchWorkItem { [weak self, weak panel] in
+            guard let self = self, let panel = panel else { return }
+            self.applyResize(size: self.pendingResize ?? size, panel: panel)
+            self.pendingResize = nil
+        }
+
+        resizeWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
+    }
+
+    private func applyResize(size: CGSize, panel: QuickAIPanel) {
+        // Prevent re-entrant frame churn from windowDidLayout / constraint passes.
+        if isApplyingResize {
+            pendingResize = size
+            return
+        }
+
+        let currentFrame = panel.frame
+        let targetHeight = max(72, size.height)
+
+        guard abs(currentFrame.height - targetHeight) > 0.5 else { return }
+
+        // Avoid fighting SwiftUI/Auto Layout update cycles. If constraints are currently
+        // being resolved, defer the resize slightly to the next runloop tick.
+        if panel.contentView?.needsUpdateConstraints == true || panel.inLiveResize {
+            scheduleResize(to: size, panel: panel)
+            return
+        }
+
+        // Perform the actual frame change on the next runloop turn to stay out of the
+        // active display/layout cycle.
+        isApplyingResize = true
+        let targetSize = targetHeight
+
+        DispatchQueue.main.async { [weak self, weak panel] in
+            guard let self = self, let panel = panel else { return }
+
+            let currentFrame = panel.frame
+            let newY = currentFrame.maxY - targetSize
+            let newFrame = NSRect(
+                x: currentFrame.minX,
+                y: newY,
+                width: currentFrame.width,  // keep width fixed; only grow vertically
+                height: targetSize)
+
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                panel.setFrame(newFrame, display: false)
+            }
+
+            self.isApplyingResize = false
+
+            // If another resize was queued while applying, run it once.
+            if let next = self.pendingResize {
+                self.pendingResize = nil
+                self.scheduleResize(to: next, panel: panel)
+            }
         }
     }
 }

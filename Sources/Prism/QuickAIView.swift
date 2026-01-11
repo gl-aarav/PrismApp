@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct QuickAIView: View {
@@ -6,6 +7,7 @@ struct QuickAIView: View {
 
     @ObservedObject var chatManager = ChatManager.shared
     @State private var inputText: String = ""
+    @State private var inputLineCount: Int = 1
     @State private var isLoading: Bool = false
     @State private var selectedProvider: String = "Ollama"
     @State private var thinkingLevel: String = "medium"
@@ -230,6 +232,7 @@ struct QuickAIView: View {
                                 }
                                 .padding(20)
                             }
+                            .scrollIndicators(.hidden)
                             .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
                                 if let lastId = chatManager.getCurrentMessages().last?.id {
                                     withAnimation {
@@ -280,6 +283,9 @@ struct QuickAIView: View {
                         .lineLimit(1...6)
                         .multilineTextAlignment(.leading)
                         .focused($isFocused)
+                        .onChange(of: inputText) { _, _ in
+                            recalcPanelSize()
+                        }
                         .onSubmit { sendMessage() }
 
                     // Thinking Level Selector
@@ -318,16 +324,17 @@ struct QuickAIView: View {
                 .background(CommandBarBackground(cornerRadius: 26))
             }
         }
+        .frame(width: 700)
         .onAppear {
             isFocused = true
-            onResize?(CGSize(width: 700, height: 80))
+            recalcPanelSize()
         }
         .onChange(of: isExpanded) { _, expanded in
-            let targetSize =
-                expanded ? CGSize(width: 700, height: 520) : CGSize(width: 700, height: 86)
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.92, blendDuration: 0.08)) {
-                onResize?(targetSize)
-            }
+            recalcPanelSize()
+        }
+        .onChange(of: chatManager.getCurrentMessages().count) { _, _ in
+            // Keep the panel height consistent when entering/exiting expanded chat.
+            recalcPanelSize()
         }
     }
 
@@ -360,6 +367,32 @@ struct QuickAIView: View {
         }
     }
 
+    private func recalcPanelSize() {
+        let baseWidth: CGFloat = 700
+        let controlFootprint: CGFloat = 190  // approximated width taken by icons/buttons
+        let horizontalPadding: CGFloat = 32  // padding inside the input bar
+        let measureWidth = max(260, baseWidth - controlFootprint - horizontalPadding)
+
+        let font = NSFont.systemFont(ofSize: 16)
+        let textToMeasure = inputText.isEmpty ? "Request..." : inputText
+        let bounding = textToMeasure.boundingRect(
+            with: CGSize(width: measureWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil)
+
+        let lineHeight = max(1, font.ascender - font.descender + font.leading)
+        let lines = min(6, max(1, Int(ceil(bounding.height / max(1, lineHeight)))))
+        inputLineCount = lines
+
+        let extraHeightPerLine = lineHeight * 0.82
+        // Increased base heights to accommodate shadows and prevent clipping
+        let baseHeight: CGFloat = isExpanded ? 550 : 110
+        let targetHeight = baseHeight + CGFloat(max(0, lines - 1)) * extraHeightPerLine
+
+        onResize?(CGSize(width: baseWidth, height: targetHeight))
+    }
+
     func getProviderIcon(_ provider: String) -> String {
         switch provider {
         case "On-Device": return "iphone"
@@ -382,6 +415,7 @@ struct QuickAIView: View {
 
         let content = inputText
         inputText = ""
+        recalcPanelSize()
 
         let userMsg = Message(content: content, image: nil, isUser: true)
         chatManager.addMessage(userMsg)
@@ -622,11 +656,11 @@ struct CommandBarBackground: View {
         )
 
         return ZStack {
-            Capsule(style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial.opacity(min(max(commandBarVibrancy, 0.05), 0.9)))
-            Capsule(style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(gradient)
-            Capsule(style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(
                     colorScheme == .dark
                         ? Color.black.opacity(0.35)
@@ -636,7 +670,7 @@ struct CommandBarBackground: View {
         }
         .drawingGroup()
         .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
-        // Mask shadow and contents to capsule to prevent faint corner artifacts
-        .mask(Capsule(style: .continuous))
+        // Mask shadow and contents to a fixed-radius rect so added height doesn't overly round corners
+        .mask(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }

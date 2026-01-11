@@ -37,12 +37,14 @@ struct PrismApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    static weak var shared: AppDelegate?
     private var appearanceObservation: NSKeyValueObservation?
     private var lightIcon: NSImage?
     private var darkIcon: NSImage?
 
     override init() {
         super.init()
+        AppDelegate.shared = self
         UserDefaults.standard.register(defaults: ["ShowMenuBar": true, "EnableQuickAI": true])
     }
 
@@ -135,6 +137,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let base = NSImage(contentsOf: url)
         else { return nil }
         return roundedIcon(from: base)
+    }
+
+    func refreshAppIcon() {
+        let appearance = NSApp.effectiveAppearance
+        updateAppIcon(for: appearance)
     }
 
     private func roundedIcon(from image: NSImage) -> NSImage {
