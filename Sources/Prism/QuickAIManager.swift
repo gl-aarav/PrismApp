@@ -105,7 +105,6 @@ class QuickAIManager: ObservableObject {
             }
 
             panel.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
         }
     }
 
