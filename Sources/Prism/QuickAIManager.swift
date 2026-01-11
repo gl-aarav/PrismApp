@@ -34,8 +34,6 @@ class QuickAIManager: ObservableObject {
             },
             onClose: { [weak panel] in
                 panel?.orderOut(nil)
-                NSApp.setActivationPolicy(.regular)
-                AppDelegate.shared?.refreshAppIcon()
 
                 // If no other windows are visible, hide the app to return focus to previous app
                 let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
@@ -73,10 +71,6 @@ class QuickAIManager: ObservableObject {
 
         if panel.isVisible && panel.isKeyWindow {
             panel.orderOut(nil)
-            NSApp.setActivationPolicy(.regular)
-            AppDelegate.shared?.refreshAppIcon()
-
-            // If no other windows are visible, hide the app to return focus to previous app
             let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
             if !otherWindowsVisible {
                 if let previousApp = previousApp {
@@ -99,12 +93,7 @@ class QuickAIManager: ObservableObject {
             }
 
             // Switch to accessory mode if no other windows are visible to avoid Dock/Menu bar activation
-            let otherWindowsVisible = NSApp.windows.contains { $0 != panel && $0.isVisible }
-            if !otherWindowsVisible {
-                NSApp.setActivationPolicy(.accessory)
-                AppDelegate.shared?.refreshAppIcon()
-            }
-
+            
             if let screen = NSScreen.main {
                 let screenRect = screen.visibleFrame
                 let panelSize = panel.frame.size
